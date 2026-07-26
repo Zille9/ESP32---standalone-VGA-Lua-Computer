@@ -13,7 +13,6 @@
 ```
 
 ![Startbildschirm](Pictures/screen.png)
-Startbildschirm
 
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/3b09620d-343e-4528-a2ce-aa2e55ab97dd" />
 Dateimanager
