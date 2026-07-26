@@ -24,4 +24,7 @@ Grafik-Funktion
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/35c41634-b7ba-4fee-91d1-93b26883f175" />
 Spiele
 
+<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/6ab7f8fb-89ed-4f95-8fba-aef842b0b6b1" />
+3D-Grafik
+
 
