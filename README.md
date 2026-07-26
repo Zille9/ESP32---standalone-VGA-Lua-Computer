@@ -12,19 +12,14 @@
 -BMP Import/Export (Screenshot-Funktion)
 ```
 
-![Startbildschirm](Pictures/screen.png)
+![Startbildschirm](Pictures/screen.png) Startbildschirm
 
-<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/3b09620d-343e-4528-a2ce-aa2e55ab97dd" />
-Dateimanager
+![Startbildschirm](Pictures/screen_01.png) Dateimanager
 
-<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/3d6cbd32-a82a-47db-8b97-99225c51aafa" />
-Grafik-Funktion         
+![Startbildschirm](Pictures/screen_02.png) Grafik-Funktion         
 
-<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/35c41634-b7ba-4fee-91d1-93b26883f175" />
-Spiele
+![Startbildschirm](Pictures/screen_03.png) Spiele
 
-<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/6ab7f8fb-89ed-4f95-8fba-aef842b0b6b1" />
-3D  -  Grafiken
+![Startbildschirm](Pictures/screen_07.png) 3D - Grafiken
 
-<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/bffc6dda-30f6-4896-a3f4-fa7b6367bede" />
-Fullscreen-Editor
+![Startbildschirm](Pictures/screen_08.png) Fullscreen-Editor
