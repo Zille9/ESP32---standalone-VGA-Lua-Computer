@@ -4,7 +4,7 @@
 ### angepasst von:Reinhard Zielinski <zille09@gmail.com>                                                                   
 ### Das Ergebnis ist ein kleiner Retro-Computer mit folgender Ausstattung:
 ```
--VGA Ausgabe 320x240 Pixel mit Font 6x8 - 53x30 Zeichen
+-VGA Ausgabe 320x240 64 Farben mit Font 6x8 - 53x30 Zeichen
 -Fullscreen-Editor mit Block-Copy/Paste/Delete
 -Grafikfunktionen
 -SD-Karten-Zugriff
