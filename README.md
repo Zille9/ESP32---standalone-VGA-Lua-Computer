@@ -11,17 +11,15 @@
 -Window-Funktion
 -BMP Import/Export (Screenshot-Funktion)
 ```
-Startbildschirm
 
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/b0768e8e-803e-43e1-b669-282e59cdc6b2" />
-
-Dateimanager
+Startbildschirm
 
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/3b09620d-343e-4528-a2ce-aa2e55ab97dd" />
-
-Grafik
+Dateimanager
 
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/3d6cbd32-a82a-47db-8b97-99225c51aafa" />
+Grafik
 
 Spiele
 
