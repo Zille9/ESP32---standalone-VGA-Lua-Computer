@@ -46,20 +46,19 @@
 #include <Arduino.h>
 #include "fabgl.h" //********************************************* Bibliotheken zur VGA-Signalerzeugung *********************************************
 fabgl::Terminal         Terminal;
-fabgl::VGAController    VGAController;      //VGA-Variante
+fabgl::VGAController    VGAController;      
 fabgl::Canvas           GFX(&VGAController);
 TerminalController      tc(&Terminal);
 fabgl::SoundGenerator SoundGenerator;
 
 //**************************** EDITOR - Varablen **********************************************
-// Der dedizierte 48 KB Bearbeitungspuffer im internen RAM
-#define EDIT_BUFF_SIZE 131072       // 128 KB (Oder 262144 für 256 KB – ganz nach Wunsch!)
-char* textBuffer = nullptr;         // Ein Pointer auf den Speicherbereich im PSRAM
+#define EDIT_BUFF_SIZE 131072     // 128 KB (Oder 262144 für 256 KB – ganz nach Wunsch!)
+char* textBuffer = nullptr;       // Ein Pointer auf den Speicherbereich im PSRAM
 uint32_t textLen = 0;
 uint32_t topIndex = 0; // Byte-Adresse im textBuffer, ab der die aktuelle Seite gerendert wird
-uint32_t leftColumn = 1; // Startspalte für die Anzeige (Standard: 1)
+uint32_t leftColumn = 1;          // Startspalte für die Anzeige (Standard: 1)
 
-#define LUA_MAX_PSRAM  1048576   // 1 MB Limit für Lua (1 * 1024 * 1024)
+#define LUA_MAX_PSRAM  1048576    // 1 MB Limit für Lua (1 * 1024 * 1024)
 size_t luaCurrentMemoryUsage = 0; // Zähler für den aktuellen Verbrauch
 
 //------------------------- Editor Zwischenablage -------------------------
@@ -80,7 +79,7 @@ const int MAX_R = 240 / y_char[current_Font];           //Anzahl Textzeilen
 
 
 String inputBuffer = "";
-uint8_t fColor = 63; // Vordergrundfarbe weiss
+uint8_t fColor = 63;  // Vordergrundfarbe weiss
 uint8_t bColor = 1;   // Hintergrundfarbe dunkelblau
 
 bool Cursor = true;   //globaler Cursor-Merker
@@ -142,7 +141,7 @@ struct WindowSlot {
   Rect savedRect;                 // Speichert die exakten Maße dieses Fensters
 };
 
-// Ihr bestehendes Array (jetzt mit integrierten Puffern)
+// Window-Array (jetzt mit integrierten Puffern)
 WindowSlot windowManager[8];
 bool Window_aktiv = false;
 //------------------------------------------ SD-Karte ----------------------------------------------------------------------------------------------
@@ -217,7 +216,7 @@ extern "C" {
       return -1;
     }
     int system(const char *command) {
-      return -1; // Gibt an den Lua-Interpreter zurück, dass kein System-OS existiert
+      return -1; 
     }
   }
 
@@ -226,7 +225,7 @@ extern "C" {
 
 
 
-  // Hilfsfunktion: Macht aus "skript.lua" automatisch "/pfad/skript.lua"
+  // Hilfsfunktion: Macht aus "skript.lua" -> "/pfad/skript.lua"
   String resolve_lua_path(String filename) {
     if (filename.startsWith("/")) {
       return filename;                // Wenn es absolut mit / beginnt, so lassen
@@ -237,28 +236,16 @@ extern "C" {
 
   void fbcolor(int fc, int bc)
   {
-    /*
-      if (!Frame_nr) {
-      Frame_vcol[0] = fc;
-      Frame_hcol[0] = bc;
-      }
-    */
-
     fcolor(fc);
     bcolor(bc);
   }
 
   void fcolor(int fc) {
-    //GFX.setPenColor((bitRead(fc, 5) * 2 + bitRead(fc, 4)) * 64, (bitRead(fc, 3) * 2 + bitRead(fc, 2)) * 64, (bitRead(fc, 1) * 2 + bitRead(fc, 0)) * 64);
     GFX.setPenColor(((fc >> 4) & 0x03) * 85, ((fc >> 2) & 0x03) * 85, (fc & 0x03) * 85);
-    //delay(2);
   }
 
   void bcolor(int bc) {
-    //GFX.setBrushColor((bitRead(bc, 5) * 2 + bitRead(bc, 4)) * 64, (bitRead(bc, 3) * 2 + bitRead(bc, 2)) * 64, (bitRead(bc, 1) * 2 + bitRead(bc, 0)) * 64);
     GFX.setBrushColor(((bc >> 4) & 0x03) * 85, ((bc >> 2) & 0x03) * 85, (bc & 0x03) * 85);
-    //delay(2);
-
   }
 
 
@@ -288,7 +275,6 @@ extern "C" {
       else if (lua_isboolean(L, i)) outStr += (lua_toboolean(L, i) ? "true" : "false");
       else outStr += lua_typename(L, lua_type(L, i));
     }
-    //outStr += "\n\r";
     Terminal.print(outStr.c_str());
     return 0;
   }
@@ -308,13 +294,7 @@ extern "C" {
 
   //************************************* Lua-Inkey ***********************************************
   // Globale Lua-Funktion: inkey() - Gibt den gedrückten Tastencode zurück oder -1
-  /*
-    int lua_global_inkey(lua_State* L) {
-    int taste = Terminal.read(5);
-    lua_pushinteger(L, taste);
-    return 1;
-    }
-  */
+
   int lua_global_inkey(lua_State* L) {
     if (!Terminal.available()) {
       lua_pushinteger(L, 0); // 0 signalisiert Lua: Keine Taste gedrückt
@@ -410,11 +390,11 @@ extern "C" {
         if (next2 == 'R') {lua_pushinteger(L, KEY_F3);return 1;}
         if (next2 == 'S') {lua_pushinteger(L, KEY_F4);return 1;}
       }
-      // Falls die Sequenz unbekannt oder korrupt war
+      // Falls Sequenz unbekannt oder korrupt war
       lua_pushinteger(L, 0);
       return 1;
     }
-    // 4. Jedes normale ASCII-Zeichen direkt zurückgeben
+    // normale ASCII-Zeichen zurückgeben
     lua_pushinteger(L, c);
     return 1;
   }
@@ -463,7 +443,6 @@ extern "C" {
 
         currentEditingFilename = filename;                    //Dateiname für eventuelles editieren (F2) speichern
 
-        // Code ausführen
         int status = luaL_dostring(L, textBuffer);
 
         if (status != LUA_OK) {
@@ -475,8 +454,7 @@ extern "C" {
           fehlerZeile = 1;
           int doppelpunktIdx = errorMsg.indexOf(':');
 
-          if (doppelpunktIdx != -1) {
-            // Nach dem ersten Doppelpunkt steht die Zeile (z.B. "game.lua:14:")
+          if (doppelpunktIdx != -1) {                         //Fehlerzeile auslesen
             String rest = errorMsg.substring(doppelpunktIdx + 1);
             int zweiterDoppelpunkt = rest.indexOf(':');
             if (zweiterDoppelpunkt != -1) {
@@ -522,7 +500,7 @@ extern "C" {
   // 1. vga.color(vordergrund, hintergrund)
   int lua_vga_color(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2)) {
-      Terminal.print("FEHLER : vga.color(vordergrund, hintergrund) erwartet 2 Zahlen!");
+      Terminal.print("FEHLER : vga.color(vordergrund, hintergrund)");
       lua_pushboolean(L, false);
       return 1;
     }
@@ -534,7 +512,7 @@ extern "C" {
 
   // 2. vga.cls()
   int lua_vga_cls(lua_State* L) {
-    int farbe = bColor; // Fallback auf das aktuelle globale bColor
+    int farbe = bColor; 
     if (lua_gettop(L) >= 1 && lua_isnumber(L, 1)) {
       farbe = (int)lua_tonumber(L, 1);
     }
@@ -542,7 +520,6 @@ extern "C" {
     bcolor(bColor);
     Terminal.enableCursor(false);
     GFX.clear();
-    //Terminal.clear();
     tc.setCursorPos(1, 1);
     Terminal.enableCursor(Cursor);
     Terminal.println();
@@ -550,7 +527,6 @@ extern "C" {
   }
 
   int lua_vga_cursor_onoff(lua_State* L) {
-    //bool cur = true; // Fallback Cursor immer an
     if (lua_isboolean(L, 1)) {
       Cursor = lua_toboolean(L, 1);
     }
@@ -657,7 +633,7 @@ extern "C" {
     int txtBColor = bColor;
     int fontsatz = current_Font; // Standardwert: Systemfont
 
-    // FALL 1: Es wurden mindestens 3 Argumente uebergeben (spalte, zeile, "text" ...)
+    // Es wurden mindestens 3 Argumente uebergeben (spalte, zeile, "text" ...)
     if (argumente >= 3 && lua_isnumber(L, 1) && lua_isnumber(L, 2) && lua_isstring(L, 3)) {
       spalte = (int)lua_tonumber(L, 1);
       zeile = (int)lua_tonumber(L, 2);
@@ -669,7 +645,7 @@ extern "C" {
       if (argumente >= 6 && lua_isnumber(L, 6)) fontsatz = (int)lua_tonumber(L, 6);
 
     }
-    // FALL 2: Es wurde nur der Text uebergeben (Nutzt aktuelle Cursor-Position)
+    // Es wurde nur der Text uebergeben (Nutzt aktuelle Cursor-Position)
     else if (argumente >= 1 && lua_isstring(L, 1)) {
       txt = lua_tostring(L, 1);
 
@@ -683,8 +659,6 @@ extern "C" {
       lua_pushboolean(L, false);
       return 1;
     }
-
-    // --- 1. Text direkt auf die VGA-Karte zeichnen ---
     fbcolor(txtFColor, txtBColor);
     drawing_text(fontsatz, spalte * x_char[fontsatz], zeile * y_char[fontsatz] , txt);                                 //Anpassung , nicht pixelgenau sondern spalten und zeilenbasiert
     fbcolor(fColor, bColor);
@@ -698,7 +672,7 @@ extern "C" {
   // 4. Pixel zeichnen: vga.pset(x, y, farbe)
   int lua_vga_pset(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2) || !lua_isnumber(L, 3)) {
-      Terminal.print("FEHLER: vga.pset(x, y, farbe) erwartet 3 Zahlen!");
+      Terminal.print("FEHLER: vga.pset(x, y, farbe)");
       lua_pushboolean(L, false);
       return 1;
     }
@@ -715,7 +689,7 @@ extern "C" {
   // 5. Rechteck zeichnen: vga.box(x, y, w, h, farbe)
   int lua_vga_box(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2) || !lua_isnumber(L, 3) || !lua_isnumber(L, 4)) {
-      Terminal.print("FEHLER: vga.box(x1, y1, w, h [, farbe]) erwartet mindestens 4 Zahlen!");
+      Terminal.print("FEHLER: vga.box(x1, y1, w, h [, farbe])");
       lua_pushboolean(L, false);
       return 1;
     }
@@ -723,7 +697,6 @@ extern "C" {
     int y1 = (int)lua_tonumber(L, 2);
     int w2 = (int)lua_tonumber(L, 3);
     int h2 = (int)lua_tonumber(L, 4);
-
     int rColor = bColor;
     if (lua_gettop(L) >= 5 && lua_isnumber(L, 5)) rColor = (int)lua_tonumber(L, 5);
     bcolor(rColor);
@@ -735,7 +708,7 @@ extern "C" {
   // 6. LEERES RECHTECK (vga.rect): 4-Linien-Methode
   int lua_vga_rect(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2) || !lua_isnumber(L, 3) || !lua_isnumber(L, 4)) {
-      Terminal.print("FEHLER: vga.rect(x1, y1, w2, h2 [, farbe]) erwartet mindestens 4 Zahlen!");
+      Terminal.print("FEHLER: vga.rect(x1, y1, w2, h2 [, farbe])");
       lua_pushboolean(L, false);
       return 1;
     }
@@ -743,8 +716,6 @@ extern "C" {
     int y1 = (int)lua_tonumber(L, 2);
     int w2 = (int)lua_tonumber(L, 3);
     int h2 = (int)lua_tonumber(L, 4);
-
-    // Standardwert aus globaler Variable laden
     int rColor = fColor;
     if (lua_gettop(L) >= 5 && lua_isnumber(L, 5)) rColor = (int)lua_tonumber(L, 5);
     fcolor(rColor);
@@ -764,11 +735,8 @@ extern "C" {
     int y = (int)lua_tonumber(L, 2);
     int w = (int)lua_tonumber(L, 3);
     int h = (int)lua_tonumber(L, 4);
-
-    // Standardwerte aus globalen Variablen laden
     int ellBColor = bColor;
 
-    // Optionale Farben überschreiben, falls vom Benutzer in Lua übergeben
     if (lua_gettop(L) >= 5 && lua_isnumber(L, 5)) ellBColor = (int)lua_tonumber(L, 5);
     bcolor(ellBColor);
     GFX.fillEllipse(x, y, w, h);
@@ -811,12 +779,12 @@ extern "C" {
     int lColor = fColor;
     if (lua_gettop(L) >= 5 && lua_isnumber(L, 5)) lColor = (int)lua_tonumber(L, 5);
     fcolor(lColor);
-    GFX.drawLine(x1, y1, x2, y2);                          //Line line x,y,xx,yy
+    GFX.drawLine(x1, y1, x2, y2);                          
     fcolor(fColor);
     return 0;
   }
 
-  //10. vga.pos(spalte, zeile) zum Setzen der Cursor-Position auf der Konsole
+  //10. vga.pos(spalte, zeile) Setzen der Cursor-Position auf der Konsole
   int lua_vga_pos(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2)) {
       Terminal.print("FEHLER: vga.pos(spalte, zeile)");
@@ -827,23 +795,19 @@ extern "C" {
     int spalte = (int)lua_tonumber(L, 1);
     int zeile = (int)lua_tonumber(L, 2);
 
-    // Grenzen absichern, damit der Cursor nicht außerhalb des Bildschirms landet
+    // Grenzen absichern, damit Cursor nicht außerhalb des Bildschirms landet
     if (spalte < 0) spalte = 0;
     if (spalte >= MAX_C) spalte = MAX_C - 1;
     if (zeile < 0) zeile = 0;
     if (zeile >= MAX_R) zeile = MAX_R - 1;
-
-    //cursorX = spalte;
-    //cursorY = zeile;
     tc.setCursorPos(spalte, zeile);
     return 0;
   }
 
   int lua_vga_get_colors(lua_State* L) {
-    // Die Werte auf den Lua-Stack legen
-    lua_pushinteger(L, fColor); // Erster Rückgabewert (fColor)
-    lua_pushinteger(L, bColor); // Zweiter Rückgabewert (bColor)
-    return 2; //2 Werte zurückgeben
+    lua_pushinteger(L, fColor); 
+    lua_pushinteger(L, bColor); 
+    return 2; 
   }
 
   // Lua Funktion vga.waitsync()
@@ -916,7 +880,6 @@ extern "C" {
 
     if (windowManager[idx].screenBackup != nullptr) {
       Terminal.enableCursor(false);
-      // Wir fotografieren NUR die Pixel, die JETZT an dieser Stelle stehen!
       VGAController.readScreen(windowManager[idx].savedRect, windowManager[idx].screenBackup);
       Terminal.enableCursor(Cursor);
     }
@@ -962,11 +925,11 @@ extern "C" {
     // ================= LOKALEN SPEICHERBEREICH RESTAURIEREN =================
     if (windowManager[idx].screenBackup != nullptr) {
       Terminal.enableCursor(false);
-      // Hintergrund pixelgenau zurückschreiben
+      // Hintergrund zurückschreiben
       VGAController.writeScreen(windowManager[idx].savedRect, windowManager[idx].screenBackup);
       Terminal.enableCursor(Cursor);
 
-      // PSRAM für diesen Slot sofort wieder freigeben!
+      // PSRAM für diesen Slot wieder freigeben!
       free(windowManager[idx].screenBackup);
       windowManager[idx].screenBackup = nullptr;
     }
@@ -985,15 +948,12 @@ extern "C" {
 
   // 4. Automatische Reinigung (wichtig bei Skript-Abbruch von Lua)
   void cleanupWindows() {
-    // Wir laufen rückwärts (von Slot 7 zu 0) durch, um überlappende Fenster
-    // in der korrekten Reihenfolge von oben nach unten abzubauen!
     for (int idx = 7; idx >= 0; idx--) {
       if (windowManager[idx].aktiv) {
         if (windowManager[idx].screenBackup != nullptr) {
           Terminal.enableCursor(false);
           VGAController.writeScreen(windowManager[idx].savedRect, windowManager[idx].screenBackup);
           Terminal.enableCursor(Cursor);
-
           free(windowManager[idx].screenBackup);
           windowManager[idx].screenBackup = nullptr;
         }
@@ -1082,17 +1042,15 @@ extern "C" {
     int vh = 320;
     int vv = 240;
 
-    // Header-Bytes fehlerfrei extrahieren
+    // Header-Bytes extrahieren
     uint32_t xx = bmp_header[18] | ((uint32_t)bmp_header[19] << 8) | ((uint32_t)bmp_header[20] << 16) | ((uint32_t)bmp_header[21] << 24);
     uint32_t yy = bmp_header[22] | ((uint32_t)bmp_header[23] << 8) | ((uint32_t)bmp_header[24] << 16) | ((uint32_t)bmp_header[25] << 24);
     uint32_t bmpImageoffset = bmp_header[10] | ((uint32_t)bmp_header[11] << 8) | ((uint32_t)bmp_header[12] << 16) | ((uint32_t)bmp_header[13] << 24);
 
     uint32_t rowSize = (xx * 3 + 3) & ~3;
 
-    // --- ANPASSUNG FÜR DIE KORREKTE LUA-SKALIERUNG ---
-    // Wir nutzen den übergebenen Skalierungsfaktor sc direkt.
-    // Ein Faktor von 0.25 verkleinert das Bild auf 1/4 der Größe.
-    if (sc <= 0.0f) sc = 1.0f; // Sicherheits-Fallback
+    //Skalierung 
+    if (sc <= 0.0f) sc = 1.0f; 
 
     // Berechnen der Schrittweiten im Originalbild
     float xtmp = 1.0f / sc;
@@ -1102,57 +1060,45 @@ extern "C" {
     int targetWidth  = (int)((float)xx * sc);
     int targetHeight = (int)((float)yy * sc);
 
-    // Verhindern, dass über den physikalischen Bildschirmrand gezeichnet wird
+    // Zeichengranzen abfragen
     if (targetWidth > vh) targetWidth = vh;
     if (targetHeight > vv) targetHeight = vv;
     // --------------------------------------------------
 
-    // OPTIMIERUNG 1: Zeilenpuffer auf dem Ultraschnellen Stack anlegen
+    //Zeilenpuffer auf dem Stack anlegen
     uint8_t* rowBuffer = (uint8_t*)alloca(rowSize);
-
-    // OPTIMIERUNG 2: Fixed-Point Arithmetik (16.16) für die X-Schleife
     uint32_t fp_xtmp = (uint32_t)(xtmp * 65536.0f);
 
     for (int row = 0; row < targetHeight; row++) {
-      // Schrittweite ytmp wird auf die Zeile angewendet, um die Y-Position im Originalbild zu finden
       int sourceY = (int)yy - 1 - (int)((float)row * ytmp);
       if (sourceY < 0) break;
       if (sourceY >= (int)yy) continue; // Sicherheitsprüfung
 
-      // OPTIMIERUNG 3: Nur EIN EINZIGER Seek pro Zeile!
       uint32_t rowStartPos = bmpImageoffset + (sourceY * rowSize);
       fp.seek(rowStartPos);
-      fp.read(rowBuffer, rowSize); // Gesamte Zeile am Stück streamen
+      fp.read(rowBuffer, rowSize);                                  // Gesamte Zeile am Stück streamen
 
       int sy = row + y_offset;
-      if (sy < 0 || sy >= vv) continue; // Außerhalb des vertikalen Bildschirms? Überspringen.
+      if (sy < 0 || sy >= vv) continue;                             // Außerhalb des vertikalen Bildschirms? Überspringen.
 
-      uint32_t fp_sourceX = 0; // Fixed-Point Zähler für X
+      uint32_t fp_sourceX = 0;                                      // X-Zähler
 
       for (int col = 0; col < targetWidth; col++) {
-        uint32_t sourceX = fp_sourceX >> 16; // Zurück in echten Integer wandeln
+        uint32_t sourceX = fp_sourceX >> 16; 
         if (sourceX >= xx) break;
 
         int sx = col + x_offset;
         if (sx >= 0 && sx < vh) {
-          // Pixel-Adresse im Zeilenpuffer direkt berechnen (3 Bytes pro Pixel: B, G, R)
           uint32_t bufIdx = sourceX * 3;
           uint8_t farbNummer = ((rowBuffer[bufIdx + 2] & 0xC0) >> 2) |  // Rot:   Die obersten 2 Bits -> Bits 4 und 5
                                ((rowBuffer[bufIdx + 1] & 0xC0) >> 4) |  // Grün:  Die obersten 2 Bits -> Bits 2 und 3
                                ((rowBuffer[bufIdx]     & 0xC0) >> 6);   // Blau:  Die obersten 2 Bits -> Bits 0 und 1
-          /*
-            // Bit-Schieben und Maskieren direkt aus dem RAM-Puffer
-            uint8_t farbNummer = (rowBuffer[bufIdx + 2] & 0xE0) |
-                               ((rowBuffer[bufIdx + 1] & 0xE0) >> 3) |
-                               (rowBuffer[bufIdx] >> 6);
-          */
           fcolor(farbNummer);
           GFX.setPixel(sx, sy);
           fcolor(fColor);
-          //GFX.drawPixel(sx, sy, farbNummer);
         }
 
-        fp_sourceX += fp_xtmp; // In 16.16 Schritten weiterzählen
+        fp_sourceX += fp_xtmp; 
       }
     }
 
@@ -1168,7 +1114,7 @@ extern "C" {
   bool speichere_bildschirm_als_bmp(int x_start, int y_start, int w, int h, const char* dateiname) {
     if (w <= 0 || h <= 0) return false;
 
-    // 1. Basis-Dateinamen und Endung trennen (z.B. "screenshot.bmp" -> "screenshot" und ".bmp")
+    // Basis-Dateinamen und Endung trennen (z.B. "screen.bmp" -> "screen" und ".bmp")
     char baseName[64] = {0};
     char extension[16] = {".bmp"};
 
@@ -1182,7 +1128,7 @@ extern "C" {
       snprintf(baseName, sizeof(baseName), "%s", dateiname);
     }
 
-    // 2. Freie fortlaufende Nummer auf der SD-Karte suchen
+    // Freie fortlaufende Nummer auf der SD-Karte suchen
     String finalPath;
     char nummerierteDatei[128];
     int counter = 0;
@@ -1209,7 +1155,6 @@ extern "C" {
         }
       }
     }
-    // 3. Datei im Schreibmodus öffnen
     File fp = SD.open(finalPath.c_str(), FILE_WRITE);
     if (!fp) {
       Terminal.println("FEHLER:Dateifehler");
@@ -1257,17 +1202,6 @@ extern "C" {
           pixelBuf[1] = GFX.getPixel(currentX, currentY).G;
           pixelBuf[0] = GFX.getPixel(currentX, currentY).B;
         }
-
-        // 6-Bit RRGGBB (64 Farben) zurück in 24-Bit BGR übersetzen
-        //pixelBuf[2] = (farbNummer & 0x30) << 2;  // R:
-        //pixelBuf[1] = (farbNummer & 0x0C) << 4;  // G:
-        //pixelBuf[0] = (farbNummer & 0x03) << 6;  // B:
-
-        // 8-Bit RRRGGGBB zurück in 24-Bit BGR übersetzen
-        //pixelBuf[2] = (farbNummer & 0xE0);          // R
-        //pixelBuf[1] = (farbNummer & 0x1C) << 3;     // G
-        //pixelBuf[0] = (farbNummer & 0x03) << 6;     // B
-
         fp.write(pixelBuf, 3);
       }
 
@@ -1298,8 +1232,7 @@ extern "C" {
   // ============================================================================
   // LUA - FULLSCREEN-EDITOR
   // ============================================================================
-  // Hilfsfunktion: Zeichnet den gesamten RAM-Puffer auf das FabGL VGA-Terminal
-  // Hilfsfunktion: Aktualisiert NUR die Statuszeile, ohne das Bild neu zu zeichnen
+  // Hilfsfunktion: Aktualisiert die Statuszeile, ohne das Bild neu zu zeichnen
   void updateStatusLine(uint32_t currentPos) {
     uint32_t line = 1;
     uint32_t col = 1;
@@ -1307,7 +1240,7 @@ extern "C" {
     int y_pos = tc.getCursorRow();
     Terminal.enableCursor(false);
 
-    // Berechne Zeile und Spalte anhand der übergebenen Position direkt aus dem RAM
+    // Berechne Zeile und Spalte anhand der übergebenen Position aus dem RAM
     for (uint32_t i = 0; i < currentPos; i++) {
       if (textBuffer[i] == '\n') { // ZURÜCK AUF RAM
         line++;
@@ -1317,13 +1250,12 @@ extern "C" {
       }
     }
     tc.setCursorPos(1, MAX_R);
-    fbcolor(0, 15); // Blauer/Schwarzer Text auf Cyan-Grund
-
-    Terminal.write("\x1b[K"); // Komplette Zeile mit Hintergrundfarbe füllen
+    fbcolor(0, 15); 
+    Terminal.write("\x1b[K"); 
     Terminal.printf(" Zeile: %d Spalte: %d | Speicher: %d Bytes ", line, col, textLen);
     GFX.waitCompletion(false);
 
-    fbcolor(63, 1); // Zurück zu Ihrem Farbschema für den Schreibbereich
+    fbcolor(63, 1); 
     tc.setCursorPos(x_pos, y_pos);
     Terminal.enableCursor(Cursor);
   }
@@ -1385,30 +1317,29 @@ extern "C" {
     Terminal.enableCursor(false);
     //drawTitleLine();
     //fbcolor(63, 1);
-    GFX.fillRectangle(0, 8, MAX_C * 6, (MAX_R * 8) - 8); // Editor-Bereich löschen
+    GFX.fillRectangle(0, 8, MAX_C * 6, (MAX_R * 8) - 8);      // Editor-Bereich löschen
     tc.setCursorPos(1, 2);
 
     uint32_t i = topIndex;
     int vgaZeile = 2;
 
-    // Wir laufen zeilenweise durch das Dokument, bis der Bildschirm voll oder das Dokument zu Ende ist
+    // zeilenweise durch das Dokument, bis der Bildschirm voll oder Dokument zu Ende 
     while (i < textLen && vgaZeile <= (MAX_R - 1) ) {
       // 1. Das Ende der aktuellen Zeile im PSRAM suchen
       uint32_t lineEnd = i;
       while (lineEnd < textLen && textBuffer[lineEnd] != '\n' && textBuffer[lineEnd] != '\r') {
         lineEnd++;
       }
-      uint32_t lineLen = lineEnd - i; // Gesamtlänge der ungeschnittenen Zeile
+      uint32_t lineLen = lineEnd - i;                       // Gesamtlänge der ungeschnittenen Zeile
       if (lineLen >= leftColumn) {
-        uint32_t visibleStart = i + (leftColumn - 1); // Startpunkt im PSRAM verschieben
+        uint32_t visibleStart = i + (leftColumn - 1);       // Startpunkt im PSRAM verschieben
         uint32_t visibleLen = lineLen - (leftColumn - 1);
-        if (visibleLen > MAX_C) visibleLen = MAX_C;        // Abschneiden am rechten Bildschirmrand
+        if (visibleLen > MAX_C) visibleLen = MAX_C;         // Abschneiden am rechten Bildschirmrand
         Terminal.write(&textBuffer[visibleStart], visibleLen);
       }
       Terminal.println();
       vgaZeile++;
 
-      // Zeiger im PSRAM über den Zeilenumbruch hinwegbewegen
       i = lineEnd;
       if (i < textLen && textBuffer[i] == '\r') i++;
       if (i < textLen && textBuffer[i] == '\n') i++;
@@ -1455,7 +1386,7 @@ extern "C" {
           if (sdFile) {
             while (sdFile.available() && textLen < (EDIT_BUFF_SIZE - 1)) {
               char c = sdFile.read();
-              if (c == 0x0D) continue; // Carriage Return überspringen
+              if (c == 0x0D) continue;                                            // Carriage Return überspringen
               textBuffer[textLen++] = c;
             }
             sdFile.close();
@@ -1463,9 +1394,9 @@ extern "C" {
         } else {
           // Datei existiert nicht -> neu anlegen
           Terminal.printf("Erstelle neue Datei: %s\n\r", filename);
-          vTaskDelay(pdMS_TO_TICKS(500)); // Kurze Anzeige für den Benutzer
+          vTaskDelay(pdMS_TO_TICKS(500)); 
         }
-        currentEditingFilename = '\0';                                              // alten Dateinamen löschen
+        currentEditingFilename = '\0';                                            // alten Dateinamen löschen
         currentEditingFilename = filename;                                        // Dateiname merken für Titelzeile
 
         speichern = runFullscreenEditor(filename, fehlerZeile);
@@ -1473,7 +1404,7 @@ extern "C" {
         if (speichern) {
           File sdFileWrite = SD.open(sdPath.c_str(), FILE_WRITE);
           if (sdFileWrite) {
-            // Den gesamten Puffer im RAM in einem einzigen Rutsch hocheffizient schreiben
+            // Den gesamten Puffer im RAM auf SD-Card schreiben
             sdFileWrite.write((uint8_t*)textBuffer, textLen);
             sdFileWrite.flush();
             sdFileWrite.close();
@@ -1499,7 +1430,6 @@ extern "C" {
               int doppelpunktIdx = errorMsg.indexOf(':');
 
               if (doppelpunktIdx != -1) {
-                // Nach dem ersten Doppelpunkt steht die Zeile (z.B. "game.lua:14:")
                 String rest = errorMsg.substring(doppelpunktIdx + 1);
                 int zweiterDoppelpunkt = rest.indexOf(':');
                 if (zweiterDoppelpunkt != -1) {
@@ -1538,7 +1468,7 @@ extern "C" {
     uint32_t cursorPos = 0;
     int aktuelleZeile = 1;
 
-    // Wenn wir in eine höhere Zeile springen wollen, spulen wir den Puffer vor
+    // Wenn wir in eine höhere Zeile springen wollen, Puffer vorspulen
     if (zielZeile > 1) {
       while (cursorPos < textLen && aktuelleZeile < zielZeile) {
         if (textBuffer[cursorPos] == '\n') {
@@ -1546,7 +1476,7 @@ extern "C" {
         }
         cursorPos++; // cursorPos am Anfang der korrekten Zeile
       }
-      // Damit die Zeile nicht am oberen Rand klebt, setzen wir topIndex
+      
       // ein paar Zeilen weiter nach oben (falls möglich) für besseres visuelles Feedback
       int scrollBack = cursorPos;
       int zeilenGefunden = 0;
@@ -1563,19 +1493,17 @@ extern "C" {
     int cursorX = 1;
     int cursorY = (zielZeile - aktuelleZeile) + 2;
 
-    // Falls das Zurückscrollen (scrollBack) den topIndex verschoben hat, berechnen wir das exakt:
+    // Falls das Zurückscrollen (scrollBack) den topIndex verschoben hat, berechnen
     if (zielZeile > 1) {
-      // ermitteln, in welcher Zeile im sichtbaren Fenster der Cursor stehen muss
+      // in welcher Zeile im Fenster muss der Cursor stehen?
       int sichtbareZeile = 1;
       int checkPos = topIndex;
       while (checkPos < cursorPos) {
         if (textBuffer[checkPos] == '\n') sichtbareZeile++;
         checkPos++;
       }
-      cursorY = sichtbareZeile + 1; // +1 wegen der Titelzeile ganz oben (Zeile 2)
+      cursorY = sichtbareZeile + 1; // wegen Titelzeile ganz oben (Zeile 2)
     }
-
-    // Dem FabGL-Terminal sagen, wo der Cursor blinken soll
     tc.setCursorPos(cursorX, cursorY);
     // ==========================================
     bool editing = true;
@@ -1625,9 +1553,8 @@ extern "C" {
 
       // ================= F2-TASTE: MULTI-ZEILEN BLOCK KOPIEREN =================
       else if (c == KEY_F2) {
-        // FALL A: Der Auswahlmodus ist noch NICHT aktiv -> Startpunkt setzen
+        // Auswahlmodus noch NICHT aktiv -> Startpunkt setzen
         if (!selectionModeActive) {
-          // Wir messen zum Anfang der aktuellen Zeile zurück, damit wir sauber zeilenweise markieren
           uint32_t lineStart = cursorPos;
           while (lineStart > 0 && textBuffer[lineStart - 1] != '\n') {
             lineStart--;
@@ -1645,7 +1572,7 @@ extern "C" {
           vTaskDelay(pdMS_TO_TICKS(500));
           redrawScreen();
         }
-        // FALL B: Der Startpunkt existiert bereits -> Jetzt den gesamten Block kopieren!
+        // Startpunkt existiert bereits -> Jetzt den gesamten Block kopieren!
         else {
           // Das Ende der aktuellen Zeile suchen, in der der Cursor gerade steht
           uint32_t lineEnd = cursorPos;
@@ -1659,7 +1586,7 @@ extern "C" {
           uint32_t start = blockStartPos;
           uint32_t ende = lineEnd;
 
-          // Falls der Nutzer von unten nach oben markiert hat, drehen wir die Werte um
+          // Falls Nutzer von unten nach oben markiert hat, Werte umdrehen
           if (start > ende) {
             uint32_t temp = start;
             start = ende;
@@ -1674,7 +1601,7 @@ extern "C" {
             clipboardBuffer[blockLen] = '\0';
             clipboardLen = blockLen;
 
-            // Block-Start-Information für ein eventuelles DEL abspeichern
+            // Block-Start-Information für DEL abspeichern
             blockStartPos = start;
 
             tc.setCursorPos(1, MAX_R);
@@ -1693,38 +1620,25 @@ extern "C" {
       // ================= F3-TASTE: ZEILE EINFÜGEN (PASTE) =================
       else if (c == KEY_F3) {
         if (clipboardLen > 0 && (textLen + clipboardLen + 1) < (EDIT_BUFF_SIZE - 1)) {
-          // 1. Platz im textBuffer schaffen (Kopierter Text + Zeilenumbruch)
+          // Platz im textBuffer schaffen (Kopierter Text + Zeilenumbruch)
           uint32_t insertLen = clipboardLen + 1; // +1 für das '\n'
           memmove(&textBuffer[cursorPos + insertLen], &textBuffer[cursorPos], textLen - cursorPos);
-          // 2. Den Text aus dem Clipboard in die Lücke schreiben
+          // Text aus dem Clipboard in die Lücke schreiben
           memcpy(&textBuffer[cursorPos], clipboardBuffer, clipboardLen);
           cursorPos += clipboardLen;
-          // 3. Den Zeilenumbruch einfügen, damit der nachfolgende Text in die nächste Zeile rutscht
+          // Zeilenumbruch einfügen, damit der nachfolgende Text in die nächste Zeile rutscht
           textBuffer[cursorPos++] = 0x0A;
           textLen += insertLen;
           redrawScreen();
         }
       }
       
-      // ================= F10-TASTE: Bildschirm speichern =================
-      /*
-      else if (c == KEY_F10){
-        tc.setCursorPos(1, MAX_R);
-        fbcolor(0, 15);
-        Terminal.print("speichere Bildschirm");
-        GFX.waitCompletion(false);
-        speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp");
-        vTaskDelay(pdMS_TO_TICKS(500));
-        fbcolor(63, 1);
-        redrawScreen();
-      }*/
-      
       // ================= PFEIL NACH OBEN ('A') =================
       if (c == KEY_UP) {
         if (cursorPos > 0) {
           uint32_t currentX = 0;
           uint32_t p = cursorPos;
-          // 1. Horizontale Spalte (currentX) der aktuellen Zeile ausmessen
+          // 1. Horizontale Spalte ausmessen
           while (p > 0 && textBuffer[p - 1] != '\n') {
             p--;
             currentX++;
@@ -1736,7 +1650,6 @@ extern "C" {
               lineStart--;
             }
             uint32_t lineLen = p - lineStart;
-            // 2. Cursor-Zielposition in der oberen Zeile berechnen (Nutzt currentX!)
             if (currentX > lineLen) {
               cursorPos = lineStart + lineLen;
             }
@@ -1745,7 +1658,7 @@ extern "C" {
             }
             // ================= DER SCROLL-CHECK ===========================
             if (cursorPos < topIndex) {
-              topIndex = lineStart; // Verschiebe die Ansicht um eine Zeile nach oben
+              topIndex = lineStart; // Verschiebe um eine Zeile nach oben
               redrawScreen();
             }
             // ==============================================================
@@ -1814,15 +1727,14 @@ extern "C" {
       else if (c == KEY_DELETE) {
         if (cursorPos < textLen) {
 
-          // 1. SCHRITT: MULTI-ZEILEN BLOCK LÖSCHEN (Cut)
-          // Wir prüfen, ob der Text an der gemerkten blockStartPos exakt dem Clipboard entspricht
+          // MULTI-ZEILEN BLOCK LÖSCHEN (Cut)
           if (clipboardLen > 0 && blockStartPos + clipboardLen <= textLen &&
               memcmp(&textBuffer[blockStartPos], clipboardBuffer, clipboardLen) == 0) {
 
             // Den gesamten Textblock im PSRAM nach vorne ziehen
             memmove(&textBuffer[blockStartPos], &textBuffer[blockStartPos + clipboardLen], textLen - (blockStartPos + clipboardLen));
             textLen -= clipboardLen;
-            textBuffer[textLen] = 0; // Pufferende abnullen
+            textBuffer[textLen] = 0; 
             cursorPos = blockStartPos;
 
             tc.setCursorPos(1, MAX_R);
@@ -1835,7 +1747,7 @@ extern "C" {
             redrawScreen();
           }
 
-          // 2. SCHRITT: STANDARDFALL (Einzelnes Zeichen löschen)
+          // STANDARDFALL (Einzelnes Zeichen löschen)
           else {
             memmove(&textBuffer[cursorPos], &textBuffer[cursorPos + 1], textLen - cursorPos);
             textLen--;
@@ -1949,7 +1861,7 @@ extern "C" {
       // ================= NORMALES ZEICHEN (DRUCKBARES ASCII) =================
       else if (c >= 32 && c <= 126) {
         if (textLen < (EDIT_BUFF_SIZE - 1)) {
-          // Macht Platz im PSRAM für genau ein neues Zeichen
+          // Macht Platz im PSRAM für ein neues Zeichen
           memmove(&textBuffer[cursorPos + 1], &textBuffer[cursorPos], textLen - cursorPos);
           textBuffer[cursorPos++] = (char)c;
           textLen++;
@@ -1974,7 +1886,6 @@ extern "C" {
       }
 
       // ================= OPTISCHE 2D-CURSOR-SYNCHRONISATION =================
-      // 1. Echte X-Textspalte (1-basiert) für die AKTUELLE Zeile berechnen (Rückwärtsmessung)
       textX = 1;
       pX = cursorPos;
       while (pX > 0 && textBuffer[pX - 1] != '\n') { // ZURÜCK AUF RAM
@@ -1982,8 +1893,7 @@ extern "C" {
         textX++;
       }
 
-      // 2. Echte Y-Zeile relativ zum aktuellen topIndex auf dem Bildschirm berechnen
-      vgaY = 2; // Start bei Zeile 2 wegen der Titelzeile
+      vgaY = 2; 
       for (uint32_t i = topIndex; i < cursorPos; i++) {
         if (textBuffer[i] == '\n') { // ZURÜCK AUF RAM
           vgaY++;
@@ -1992,38 +1902,31 @@ extern "C" {
 
       horizontalScrollChanged = false;
 
-      // SCROLL-CHECK NACH RECHTS: Wenn der Cursor den rechten Rand (Spalte 53) überschreitet
+      // SCROLL-CHECK NACH RECHTS
       if (textX >= (leftColumn + MAX_C)) {
         leftColumn = textX - (MAX_C - 1);
         horizontalScrollChanged = true;
       }
-      // SCROLL-CHECK NACH LINKS: Sobald der Cursor sich links aus dem sichtbaren Fenster bewegt
+      // SCROLL-CHECK NACH LINKS
       else if (textX < leftColumn) {
         leftColumn = textX;
         horizontalScrollChanged = true;
       }
 
-      // Falls sich der horizontale Fensterausschnitt geändert hat, Bildschirm neu aufbauen
       if (horizontalScrollChanged) {
         redrawScreen();
       }
 
-      // Die physische X-Koordinate für das FabGL Terminal berechnen (Relativ zur leftColumn)
-      vgaX = textX - leftColumn + 1;
-
-      // Live-Update der Statuszeile ganz unten
+      vgaX = textX - leftColumn + 1;      
       updateStatusLine(cursorPos);
-
-      // Den blinkenden Hardware-VGA-Cursor flimmerfrei platzieren
       tc.setCursorPos(vgaX, vgaY);
       // =======================================================================
 
       vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-    // Zurücksetzen für die Shell beim Verlassen des Editors
-    fbcolor(63, 1); // Zurück zu Weiß auf Blau für die Standard-Shell
-    delay(1);
+    
+    fbcolor(63, 1); 
     GFX.clear();
     tc.setCursorPos(1, 1);
     Terminal.enableCursor(Cursor);
@@ -2230,7 +2133,6 @@ extern "C" {
     else {
       // Falls das aktuelle Verzeichnis nicht auf '/' endet, Slash hinzufügen
       if (!zielPfad.endsWith("/")) zielPfad += "/";
-      // Jetzt den neuen Ordnernamen anhängen
       zielPfad += eingabePfad;
     }
 
@@ -2245,16 +2147,13 @@ extern "C" {
     // HARDWARE-CHECK UND SPEICHERUNG (Korrektur für ESP32)
     // ====================================================================
     String checkPath = zielPfad;
-    // Für SD.exists() MUSS der abschließende Slash zwingend entfernt werden
+    // Für SD.exists() abschließendes Slash entfernen
     if (checkPath.length() > 1 && checkPath.endsWith("/")) {
       checkPath = checkPath.substring(0, checkPath.length() - 1);
     }
 
-    // Wenn wir ins Hauptverzeichnis "/" wechseln, existiert das immer (wird nicht extra geprüft)
     if (zielPfad == "/" || SD.exists(checkPath.c_str())) {
       currentWorkDir = zielPfad; // Pfad umschalten
-
-      // Für Ihre anderen Funktionen stellen wir sicher, dass currentWorkDir immer mit '/' endet
       if (!currentWorkDir.endsWith("/")) currentWorkDir += "/";
 
       lua_pushboolean(L, true);
@@ -2313,7 +2212,7 @@ extern "C" {
   }
   //---------------------------------------------- sd.copy(Datei1,Datei2) ---------------------------------------------------------
 
-  // 6. sd.copy("quelle.lua", "ziel.lua") - Kopiert eine Datei im aktuellen Arbeitsverzeichnis
+  // 6. sd.copy("quelle.lua", "ziel.lua") 
   int lua_sd_copy(lua_State* L) {
     if (!lua_isstring(L, 1) || !lua_isstring(L, 2)) {
       Terminal.print("FEHLER: Zwei Dateinamen (Strings) erwartet!");
@@ -2385,7 +2284,6 @@ extern "C" {
 
   // 12. Funktion für sd.unmount() -> SD-Karte abmelden
   int lua_sd_unmount(lua_State* L) {
-    // 1. Alle offenen Datei-Handles schließen und Puffer leeren
     SD.end();
     fcolor(60);
     Terminal.println("SD-Card abgemeldet.");
@@ -2457,7 +2355,6 @@ extern "C" {
 
   // 15. erstellt eine Tabelle der Dateien auf der SD-Karte (REINER DATEINAME)
   int lua_sd_get_file_list(lua_State* L) {
-    // 1. Eine große Haupt-Tabelle auf dem Lua-Stack erstellen
     lua_newtable(L);
     String cleanPath = currentWorkDir;
     if (cleanPath.length() > 1 && cleanPath.endsWith("/")) { // Wenn der Pfad mit "/" endet, abschneiden
@@ -2469,7 +2366,7 @@ extern "C" {
       return 1;
     }
 
-    int eintragIndex = 1; // Lua-Indizes beginnen immer bei 1!
+    int eintragIndex = 1; 
 
     while (true) {
       File file = root.openNextFile();
@@ -2488,30 +2385,25 @@ extern "C" {
       // =============================================================================
 
       // ================== 2. SYSTEM-FILTER (Jetzt absolut wasserdicht) =============
-      // Da wir jetzt 'reinerName.c_str()' nutzen, wird garantiert nur der Name verglichen!
       char ersterBuchstabe = reinerName.length() > 0 ? reinerName[0] : '\0';
       if (ersterBuchstabe == '.' || ersterBuchstabe == 'S' || ersterBuchstabe == 's' || ersterBuchstabe == 'F' || ersterBuchstabe == 'f') {
         if (strcasecmp(reinerName.c_str(), "System Volume Information") == 0 ||
             strcasecmp(reinerName.c_str(), "FOUND.000") == 0 ||
             strncasecmp(reinerName.c_str(), "._", 2) == 0) {
           file.close();
-          continue; // Datei überspringen und ausblenden
+          continue; 
         }
       }
       // ============================================================
 
-      // 2. Für JEDE Datei eine eigene kleine Unter-Tabelle (Zeile) erstellen
+      
       lua_newtable(L);
-
-      //Serial.println(reinerName); // Debug-Ausgabe auf dem PC zeigt jetzt den reinen Namen
-
-      // Spalte 1: REINEN Dateiname hinzufügen (jetzt ohne Pfad!)
       lua_pushstring(L, reinerName.c_str());
-      lua_rawseti(L, -2, 1); // Setzt den reinen Namen an Index 1 der Unter-Tabelle
+      lua_rawseti(L, -2, 1); 
 
       // Spalte 2: Dateigröße formatieren und hinzufügen
       if (file.isDirectory()) {
-        lua_pushstring(L, "---"); // Ordner haben keine klassische Dateigröße
+        lua_pushstring(L, "---"); // Ordner haben keine Dateigröße
         lua_rawseti(L, -2, 2);    // Index 2
 
         lua_pushstring(L, "ORDNER"); // Spalte 3: Typ
@@ -2647,23 +2539,6 @@ extern "C" {
     return 3; // 3 Rückgabewerte an Lua (Tag, Monat, Jahr)
   }
 
-  /*
-    void zeigeFehlerPopup(const __FlashStringHelper* titel, const __FlashStringHelper* meldung) {
-    // Wandelt die Flash-Texte in temporäre C-Strings um
-    String t(titel);
-    String m(meldung);
-    zeigeFehlerPopup(t.c_str(), m.c_str());
-    }
-    // Unterfunktion Fehlerfenster
-    void zeigeFehlerPopup(const char* titel, const char* nachricht) {
-    cleanupWindows();
-    editorStartZeile = extrahiereFehlerZeile(nachricht);                     //fehlerhafte Zeile merken für Editor
-    renderWindow(160, 160, 320, 160, 255, DARKRED, titel, nachricht, RED);   //Fehlerfenster aufbauen
-    vga.drawText(220, 300, "Druecke eine Taste...", YELLOW, DARKRED, false); //und Fehlertext anzeigen
-    wait_key(false);
-    restoreTerminalArea(160, 160, 321, 161);
-    }
-  */
   //********************************************** System-Funktionen *****************
   // ============================================================================
   // SYSTEM INTERFACE
@@ -2766,8 +2641,8 @@ static int inchar()
               if (next2 == '2') {
                 if (next3 == '0') return KEY_F9;
                 if (next3 == '1') {speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp"); return KEY_F10;}
-                if (next3 == '3') return KEY_F11; // Korrekt gelöst!
-                if (next3 == '4') return KEY_F12; // Korrekt gelöst!
+                if (next3 == '3') return KEY_F11; 
+                if (next3 == '4') return KEY_F12; 
               }
             }
           }
@@ -2793,106 +2668,6 @@ static int inchar()
     vTaskDelay(pdMS_TO_TICKS(5)); // CPU-Entlastung im Loop
   }
 }
-
-
-/*
-  static int inchar()
-  {
-    int v;
-    char c;
-    char d;
-    while (1) {
-      if (Terminal.available()) {
-        char c = Terminal.read();
-
-        // Wenn ein ESC-Zeichen (ASCII 27) reinkommt, folgt evtl. eine Sequenz
-        if (c == 27) {
-          // Kurz warten, um zu sehen, ob weitere Zeichen der Sequenz im Puffer landen
-          uint32_t timeout = millis() + 10;
-          while (!Terminal.available() && millis() < timeout) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-          }
-
-          // Wenn nach 10ms kein weiteres Zeichen kommt, war es die echte ESC-Taste!
-          if (!Terminal.available()) {
-            return KEY_ESC;
-          }
-
-          // Das nächste Zeichen lesen (meistens '[' oder 'O' bei F-Tasten)
-          char next1 = Terminal.read();
-
-          if (next1 == '[') {
-            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-            char next2 = Terminal.read();
-
-            // 1. Pfeiltasten prüfen
-            if (next2 == 'A') return KEY_UP;
-            if (next2 == 'B') return KEY_DOWN;
-            if (next2 == 'C') return KEY_RIGHT;
-            if (next2 == 'D') return KEY_LEFT;
-            if (next2 == 'H') return KEY_HOME;
-            if (next2 == 'F') return KEY_END;
-
-            // 2. Tasten mit abschließender Tilde (z.B. ENTF, PageUp, PageDown)
-            if (next2 == '3' || next2 == '5' || next2 == '6' || (next2 >= '1' && next2 <= '2')) {
-              while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-              char tilde = Terminal.read(); // Das '~' auslesen und verwerfen
-
-              if (next2 == '3' && tilde == '~') return KEY_DELETE;
-              if (next2 == '5' && tilde == '~') return KEY_PAGE_UP;
-              if (next2 == '6' && tilde == '~') return KEY_PAGE_DOWN;
-
-              // F11 und F12 nutzen oft [23~ und [24~
-              if (next2 == '2' && tilde == '3') {
-                if (Terminal.read() == '~') return KEY_F11;
-              }
-              if (next2 == '2' && tilde == '4') {
-                if (Terminal.read() == '~') return KEY_F12;
-              }
-
-            }
-
-            // 3. Funktionstasten F5 bis F10 (je nach Terminal-Emulation)
-            if (next2 == '1' && Terminal.available()) {
-              char next3 = Terminal.read();
-              if (Terminal.read() == '~') { // Tilde verwerfen
-                if (next3 == '5') return KEY_F5;
-                if (next3 == '7') return KEY_F6;
-                if (next3 == '8') return KEY_F7;
-                if (next3 == '9') return KEY_F8;
-              }
-            }
-            if (next2 == '2' && Terminal.available()) {
-              char next3 = Terminal.read();
-              if (Terminal.read() == '~') {
-                if (next3 == '0') return KEY_F9;
-                if (next3 == '1') return KEY_F10;  //Screenshot-Funktion
-              }
-            }
-          }
-          // VT100 / Xterm Modus für F1 bis F4 (senden oft ESC O P, ESC O Q, etc.)
-          else if (next1 == 'O') {
-            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-            char next2 = Terminal.read();
-            if (next2 == 'P') return KEY_F1;
-            if (next2 == 'Q') return KEY_F2;
-            if (next2 == 'R') return KEY_F3;
-            if (next2 == 'S') return KEY_F4;
-          }
-
-          // Falls die Sequenz unbekannt war, verwerfen wir sie und senden nichts
-          return 0;
-        }
-
-        // Jedes normale ASCII-Zeichen (A-Z, 0-9, Enter=13, Backspace=8 etc.) direkt zurückgeben
-        return c;
-      }
-
-      vTaskDelay(pdMS_TO_TICKS(5)); // CPU-Entlastung im Loop
-    }
-  }
-*/
-
 
 
   void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
@@ -2926,7 +2701,7 @@ static int inchar()
 
       // Die eigentliche Allokation im PSRAM ausführen
       void* new_ptr = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM);
-      // Nur wenn die Allokation erfolgreich war, aktualisieren wir den Zähler
+      // Nur wenn die Allokation erfolgreich war, Zähler aktualisieren
       if (new_ptr != nullptr) {
         luaCurrentMemoryUsage += differenz;
       }
@@ -3149,9 +2924,9 @@ static int inchar()
     PS2Controller.keyboard() -> setLayout(&fabgl::GermanLayout);                       //deutsche Tastatur
     VGAController.begin();                                                             //VGA-Variante //64 oder 16 Farben
     //VGAController.setFont(&fabgl::FONT_5x7);
-    VGAController.setResolution(QVGA_320x240_60Hz);//QVGA_320x240_60Hz);                                    //Standard-Auflösung
+    VGAController.setResolution(QVGA_320x240_60Hz);                                    //Standard-Auflösung
     Terminal.begin(&VGAController);
-    Terminal.activate(TerminalTransition::None); // Sofort aktivieren ohne Effekt
+    Terminal.activate(TerminalTransition::None); 
     Terminal.connectLocally();                                                         // für Terminal Komandos
     Terminal.loadFont(&fabgl::FONT_6x8);//6x8);
 
@@ -3175,8 +2950,6 @@ static int inchar()
 
     // Prüfen, ob PSRAM auf dem ESP32 überhaupt aktiv/vorhanden ist
     if (psramInit()) {
-      //Terminal.printf("PSRAM aktiv. Freier Speicher: %d Bytes\n", ESP.getFreePsram());
-
       // 1. Editor-Puffer im PSRAM anlegen
       textBuffer = (char*)ps_malloc(EDIT_BUFF_SIZE);
 
@@ -3197,7 +2970,7 @@ static int inchar()
 
     Terminal.enableCursor(false);
 
-    //--------------- ESP32 RTC stellen --------------------
+    //--------------- ESP32 RTC starten und stellen --------------------
     char const *compileDate = __DATE__;
     char const *compileTime = __TIME__;
 
@@ -3217,7 +2990,7 @@ static int inchar()
     }
     e_rtc.setTime(second, minute, hour, day, month, year);
 
-    //--------------- ESP32 RTC starten und stellen --------
+    //------------------------------------------------------------------
 
     // starte den Lua-Computer-Task auf Core 1
     xTaskCreatePinnedToCore(
