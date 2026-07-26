@@ -12,14 +12,15 @@
 -BMP Import/Export (Screenshot-Funktion)
 ```
 
-![Startbildschirm](Pictures/screen.png) Startbildschirm
+| Screenshot | Description |
+|---|---|
+| ![Startbildschirm](Pictures/screen.png) | Startbildschirm |
+| ![Dateimanager](Pictures/screen_01.png) | Dateimanager |
+| ![Grafik-Funktion](Pictures/screen_02.png) | Grafik-Funktion |
+| ![Spiele](Pictures/screen_03.png) | Spiele |
+| ![3D-Grafiken](Pictures/screen_07.png) | 3D - Grafiken |
+| ![Editor](Pictures/screen_08.png) | Fullscreen-Editor |
 
-![Startbildschirm](Pictures/screen_01.png) Dateimanager
+---
 
-![Startbildschirm](Pictures/screen_02.png) Grafik-Funktion         
 
-![Startbildschirm](Pictures/screen_03.png) Spiele
-
-![Startbildschirm](Pictures/screen_07.png) 3D - Grafiken
-
-![Startbildschirm](Pictures/screen_08.png) Fullscreen-Editor
