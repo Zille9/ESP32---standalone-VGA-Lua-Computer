@@ -12,7 +12,7 @@
 -BMP Import/Export (Screenshot-Funktion)
 ```
 
-| Screenshot | Description |
+| Screenshot | Beschreibung |
 |---|---|
 | ![Startbildschirm](Pictures/screen.png) | Startbildschirm |
 | ![Dateimanager](Pictures/screen_01.png) | Dateimanager |
