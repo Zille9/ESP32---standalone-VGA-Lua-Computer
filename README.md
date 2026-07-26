@@ -27,4 +27,5 @@ Spiele
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/6ab7f8fb-89ed-4f95-8fba-aef842b0b6b1" />
 3D  -  Grafiken
 
-
+<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/bffc6dda-30f6-4896-a3f4-fa7b6367bede" />
+Fullscreen-Editor
