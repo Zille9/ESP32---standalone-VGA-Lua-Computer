@@ -19,7 +19,7 @@ Startbildschirm
 Dateimanager
 
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/3d6cbd32-a82a-47db-8b97-99225c51aafa" />
-Grafik
+Grafik         
 
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/35c41634-b7ba-4fee-91d1-93b26883f175" />
 Spiele
