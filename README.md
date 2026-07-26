@@ -15,3 +15,5 @@
 <img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/b0768e8e-803e-43e1-b669-282e59cdc6b2" />
 Startbildschirm
 
+<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/3b09620d-343e-4528-a2ce-aa2e55ab97dd" />
+
