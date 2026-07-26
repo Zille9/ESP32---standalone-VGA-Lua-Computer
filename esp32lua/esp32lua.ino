@@ -1705,8 +1705,9 @@ extern "C" {
           redrawScreen();
         }
       }
-      /*
+      
       // ================= F10-TASTE: Bildschirm speichern =================
+      /*
       else if (c == KEY_F10){
         tc.setCursorPos(1, MAX_R);
         fbcolor(0, 15);
@@ -1716,8 +1717,8 @@ extern "C" {
         vTaskDelay(pdMS_TO_TICKS(500));
         fbcolor(63, 1);
         redrawScreen();
-      }
-      */
+      }*/
+      
       // ================= PFEIL NACH OBEN ('A') =================
       if (c == KEY_UP) {
         if (cursorPos > 0) {
@@ -2704,7 +2705,97 @@ extern "C" {
     return 0; // Keine Rückgabewerte an Lua
   }
   //************************************* Inchar *************************************
+static int inchar()
+{
+  while (1) {
+    if (Terminal.available()) {
+      char c = Terminal.read();
 
+      // Wenn ein ESC-Zeichen (ASCII 27) reinkommt, folgt evtl. eine Sequenz
+      if (c == 27) {
+        // Kurz warten, um zu sehen, ob weitere Zeichen der Sequenz im Puffer landen
+        uint32_t timeout = millis() + 10;
+        while (!Terminal.available() && millis() < timeout) {
+          vTaskDelay(pdMS_TO_TICKS(1));
+        }
+
+        // Wenn nach 10ms kein weiteres Zeichen kommt, war es die echte ESC-Taste!
+        if (!Terminal.available()) {
+          return KEY_ESC;
+        }
+
+        // Das nächste Zeichen lesen (meistens '[' oder 'O' bei F-Tasten)
+        char next1 = Terminal.read();
+
+        if (next1 == '[') {
+          while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+          char next2 = Terminal.read();
+
+          // 1. Pfeiltasten prüfen
+          if (next2 == 'A') return KEY_UP;
+          if (next2 == 'B') return KEY_DOWN;
+          if (next2 == 'C') return KEY_RIGHT;
+          if (next2 == 'D') return KEY_LEFT;
+          if (next2 == 'H') return KEY_HOME;
+          if (next2 == 'F') return KEY_END;
+
+          // 2. Tasten mit einfacher, direkter Tilde (ENTF, PageUp, PageDown)
+          if (next2 == '3' || next2 == '5' || next2 == '6') {
+            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+            char tilde = Terminal.read(); // Das '~' verwerfen
+            if (next2 == '3') return KEY_DELETE;
+            if (next2 == '5') return KEY_PAGE_UP;
+            if (next2 == '6') return KEY_PAGE_DOWN;
+          }
+
+          // 3. Funktionstasten F5 bis F12 (Zwei-Ziffern-Sequenzen sicher lesen)
+          if (next2 == '1' || next2 == '2') {
+            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+            char next3 = Terminal.read(); // Die zweite Ziffer lesen (z.B. '5' bei F5 oder '3' bei F11)
+            
+            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+            char tilde = Terminal.read(); // Das abschließende '~' lesen und verwerfen
+
+            if (tilde == '~') {
+              if (next2 == '1') {
+                if (next3 == '5') return KEY_F5;
+                if (next3 == '7') return KEY_F6;
+                if (next3 == '8') return KEY_F7;
+                if (next3 == '9') return KEY_F8;
+              }
+              if (next2 == '2') {
+                if (next3 == '0') return KEY_F9;
+                if (next3 == '1') {speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp"); return KEY_F10;}
+                if (next3 == '3') return KEY_F11; // Korrekt gelöst!
+                if (next3 == '4') return KEY_F12; // Korrekt gelöst!
+              }
+            }
+          }
+        }
+        // VT100 / Xterm Modus für F1 bis F4
+        else if (next1 == 'O') {
+          while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+          char next2 = Terminal.read();
+          if (next2 == 'P') return KEY_F1;
+          if (next2 == 'Q') return KEY_F2;
+          if (next2 == 'R') return KEY_F3;
+          if (next2 == 'S') return KEY_F4;
+        }
+
+        // Falls die Sequenz unbekannt oder unvollständig war
+        return 0;
+      }
+
+      // Jedes normale ASCII-Zeichen direkt zurückgeben
+      return c;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(5)); // CPU-Entlastung im Loop
+  }
+}
+
+
+/*
   static int inchar()
   {
     int v;
@@ -2712,7 +2803,7 @@ extern "C" {
     char d;
     while (1) {
       if (Terminal.available()) {
-        char c = Terminal.read(5);
+        char c = Terminal.read();
 
         // Wenn ein ESC-Zeichen (ASCII 27) reinkommt, folgt evtl. eine Sequenz
         if (c == 27) {
@@ -2775,7 +2866,7 @@ extern "C" {
               char next3 = Terminal.read();
               if (Terminal.read() == '~') {
                 if (next3 == '0') return KEY_F9;
-                if (next3 == '1') {speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp"); return KEY_F10;}  //Screenshot-Funktion
+                if (next3 == '1') return KEY_F10;  //Screenshot-Funktion
               }
             }
           }
@@ -2800,7 +2891,7 @@ extern "C" {
       vTaskDelay(pdMS_TO_TICKS(5)); // CPU-Entlastung im Loop
     }
   }
-
+*/
 
 
 
