@@ -1,5 +1,5 @@
 # ESP32-Lua-Computer mit TTGO VGA (8MB PSRAM)
-### Lua with FabGL VGA library + PS2 PS2Controller for VGA monitor output - 2026      
+### Lua with FabGL VGA library + PS2 PS2Controller for VGA monitor output - 07/2026      
 ### original Lua - source - code from https://www.lua.org - aktuelle Version 5.5
 ### an ESP32 angepasst von:R.Zielinski <zille09@gmail.com>                                                                   
 ### Das Ergebnis ist ein kleiner Retro-Computer mit folgender Ausstattung:
