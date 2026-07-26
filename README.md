@@ -12,4 +12,4 @@
 -BMP Import/Export (Screenshot-Funktion)
 ```
 
-![Pictures/screen.png]
+<img width="320" height="240" alt="image" src="https://github.com/user-attachments/assets/b0768e8e-803e-43e1-b669-282e59cdc6b2" />
