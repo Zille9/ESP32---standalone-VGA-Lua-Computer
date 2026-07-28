@@ -23,6 +23,14 @@
 //                                                                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // ################################################### Projekt-Tagebuch ############################################################################
+// 27.07.2026
+// sd.open, close, read, write, readline und seek hinzugefügt
+// die Funktionen Suche und Weitersuchen im Editor eingebaut
+// collectgarbage() wird jetzt automatisch nach dofile bzw.nach dem Programmende aus dem Editor ausgeführt
+// PSRAM-allocator geändert, es kam zu Speicherüberläufen durch falsche Berechnungen
+// testprogramm mem.lua erstellt, um den allocator zu testen (bis zu 750kB funktionieren ohne Fehler (also sollten auch die restlichen ca.300kB sicher sein)
+// jetzt fehlen nur noch Funktionen für GPIO
+//
 // 25.07.2026
 // zusätzliche Funktionstasten im Terminal eingebaut F2 -> letzte Datei editieren (edit), F3 -> letzte Datei ausführen (run)
 // Editor erweitert, Fehler im Programm lässt den Cursor beim Aufrufen des Editors in die Fehlerzeile springen
@@ -46,7 +54,7 @@
 #include <Arduino.h>
 #include "fabgl.h" //********************************************* Bibliotheken zur VGA-Signalerzeugung *********************************************
 fabgl::Terminal         Terminal;
-fabgl::VGAController    VGAController;      
+fabgl::VGAController    VGAController;
 fabgl::Canvas           GFX(&VGAController);
 TerminalController      tc(&Terminal);
 fabgl::SoundGenerator SoundGenerator;
@@ -60,6 +68,7 @@ uint32_t leftColumn = 1;          // Startspalte für die Anzeige (Standard: 1)
 
 #define LUA_MAX_PSRAM  1048576    // 1 MB Limit für Lua (1 * 1024 * 1024)
 size_t luaCurrentMemoryUsage = 0; // Zähler für den aktuellen Verbrauch
+static String letzterSuchBegriff = ""; //letzten gesuchten Begriff merken
 
 //------------------------- Editor Zwischenablage -------------------------
 #define CLIPBOARD_SIZE 16384       // 16 KB maximaler Zeilenpuffer im PSRAM
@@ -150,7 +159,9 @@ bool Window_aktiv = false;
 #include <SPI.h>
 
 SPIClass spiSD(HSPI);
-File fp;
+//File fp;
+#define MAX_OPEN_FILES 4
+static File openFiles[MAX_OPEN_FILES];
 
 #define kSD_CS   13
 #define kSD_MISO 2 //16
@@ -216,7 +227,7 @@ extern "C" {
       return -1;
     }
     int system(const char *command) {
-      return -1; 
+      return -1;
     }
   }
 
@@ -358,26 +369,54 @@ extern "C" {
         if (next2 == '3' || next2 == '5' || next2 == '6') {
           while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
           char tilde = Terminal.read(); // '~' verwerfen
-          if (next2 == '3') {lua_pushinteger(L, KEY_DELETE);return 1;}
-          if (next2 == '5') {lua_pushinteger(L, KEY_PAGE_UP);return 1;}
-          if (next2 == '6') {lua_pushinteger(L, KEY_PAGE_DOWN);return 1;}
+          if (next2 == '3') {
+            lua_pushinteger(L, KEY_DELETE);
+            return 1;
+          }
+          if (next2 == '5') {
+            lua_pushinteger(L, KEY_PAGE_UP);
+            return 1;
+          }
+          if (next2 == '6') {
+            lua_pushinteger(L, KEY_PAGE_DOWN);
+            return 1;
+          }
         }
-        
+
         if (next2 == '1' && Terminal.available()) {
           char next3 = Terminal.read();
           if (Terminal.read() == '~') { // Tilde verwerfen
-            if (next3 == '5') {lua_pushinteger(L, KEY_F5);return 1;}
-            if (next3 == '7') {lua_pushinteger(L, KEY_F6);return 1;}
-            if (next3 == '8') {lua_pushinteger(L, KEY_F7);return 1;}
-            if (next3 == '9') {lua_pushinteger(L, KEY_F8);return 1;}
+            if (next3 == '5') {
+              lua_pushinteger(L, KEY_F5);
+              return 1;
+            }
+            if (next3 == '7') {
+              lua_pushinteger(L, KEY_F6);
+              return 1;
+            }
+            if (next3 == '8') {
+              lua_pushinteger(L, KEY_F7);
+              return 1;
+            }
+            if (next3 == '9') {
+              lua_pushinteger(L, KEY_F8);
+              return 1;
+            }
           }
         }
-        
+
         if (next2 == '2' && Terminal.available()) {
           char next3 = Terminal.read();
           if (Terminal.read() == '~') {
-            if (next3 == '0') {lua_pushinteger(L, KEY_F9);return 1;}
-            if (next3 == '1') {speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp"); lua_pushinteger(L, KEY_F10);return 1;}  //Screenshot-Funktion
+            if (next3 == '0') {
+              lua_pushinteger(L, KEY_F9);
+              return 1;
+            }
+            if (next3 == '1') {
+              speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp");  //Screenshot-Funktion
+              lua_pushinteger(L, KEY_F10);
+              return 1;
+            }
           }
         }
 
@@ -385,10 +424,22 @@ extern "C" {
       else if (next1 == 'O') {
         while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
         char next2 = Terminal.read();
-        if (next2 == 'P') {lua_pushinteger(L, KEY_F1);return 1;}
-        if (next2 == 'Q') {lua_pushinteger(L, KEY_F2);return 1;}
-        if (next2 == 'R') {lua_pushinteger(L, KEY_F3);return 1;}
-        if (next2 == 'S') {lua_pushinteger(L, KEY_F4);return 1;}
+        if (next2 == 'P') {
+          lua_pushinteger(L, KEY_F1);
+          return 1;
+        }
+        if (next2 == 'Q') {
+          lua_pushinteger(L, KEY_F2);
+          return 1;
+        }
+        if (next2 == 'R') {
+          lua_pushinteger(L, KEY_F3);
+          return 1;
+        }
+        if (next2 == 'S') {
+          lua_pushinteger(L, KEY_F4);
+          return 1;
+        }
       }
       // Falls Sequenz unbekannt oder korrupt war
       lua_pushinteger(L, 0);
@@ -468,7 +519,7 @@ extern "C" {
     } else {
       Terminal.printf("Fehler: Datei '%s' existiert nicht!\n\r", filename);
     }
-
+    lua_gc(L, LUA_GCCOLLECT, 0);        //automatisch collectgarbage() ausführen
     return 0;
   }
 
@@ -481,7 +532,7 @@ extern "C" {
 
     Terminal.println("--- SYSTEM SPEICHER ---");
     Terminal.printf(" Interner RAM (Heap) frei: %d Bytes (%d KB)\n\r", freeHeap, freeHeap / 1024);
-   // Terminal.printf(" Intern.RAM v.Lua belegt : %d Bytes (%d KB)\n\r", luaCurrentMemoryUsage, freeHeap / 1024);
+    // Terminal.printf(" Intern.RAM v.Lua belegt : %d Bytes (%d KB)\n\r", luaCurrentMemoryUsage, freeHeap / 1024);
     Terminal.printf(" max. Lua PSRAM          : %d Bytes (%d KB)\n\r", LUA_MAX_PSRAM, LUA_MAX_PSRAM / 1024);
     Terminal.printf(" Lua-Engine belegt       : %d Bytes (%d KB)\n\r", totalLuaBytes, luaMemKb);
     Terminal.printf(" Lua PSRAM-Auslastung    : %.2f%% \n\r", ((float)luaCurrentMemoryUsage / LUA_MAX_PSRAM) * 100.0);
@@ -512,7 +563,7 @@ extern "C" {
 
   // 2. vga.cls()
   int lua_vga_cls(lua_State* L) {
-    int farbe = bColor; 
+    int farbe = bColor;
     if (lua_gettop(L) >= 1 && lua_isnumber(L, 1)) {
       farbe = (int)lua_tonumber(L, 1);
     }
@@ -779,7 +830,7 @@ extern "C" {
     int lColor = fColor;
     if (lua_gettop(L) >= 5 && lua_isnumber(L, 5)) lColor = (int)lua_tonumber(L, 5);
     fcolor(lColor);
-    GFX.drawLine(x1, y1, x2, y2);                          
+    GFX.drawLine(x1, y1, x2, y2);
     fcolor(fColor);
     return 0;
   }
@@ -805,9 +856,9 @@ extern "C" {
   }
 
   int lua_vga_get_colors(lua_State* L) {
-    lua_pushinteger(L, fColor); 
-    lua_pushinteger(L, bColor); 
-    return 2; 
+    lua_pushinteger(L, fColor);
+    lua_pushinteger(L, bColor);
+    return 2;
   }
 
   // Lua Funktion vga.waitsync()
@@ -1049,8 +1100,8 @@ extern "C" {
 
     uint32_t rowSize = (xx * 3 + 3) & ~3;
 
-    //Skalierung 
-    if (sc <= 0.0f) sc = 1.0f; 
+    //Skalierung
+    if (sc <= 0.0f) sc = 1.0f;
 
     // Berechnen der Schrittweiten im Originalbild
     float xtmp = 1.0f / sc;
@@ -1084,7 +1135,7 @@ extern "C" {
       uint32_t fp_sourceX = 0;                                      // X-Zähler
 
       for (int col = 0; col < targetWidth; col++) {
-        uint32_t sourceX = fp_sourceX >> 16; 
+        uint32_t sourceX = fp_sourceX >> 16;
         if (sourceX >= xx) break;
 
         int sx = col + x_offset;
@@ -1098,7 +1149,7 @@ extern "C" {
           fcolor(fColor);
         }
 
-        fp_sourceX += fp_xtmp; 
+        fp_sourceX += fp_xtmp;
       }
     }
 
@@ -1250,12 +1301,12 @@ extern "C" {
       }
     }
     tc.setCursorPos(1, MAX_R);
-    fbcolor(0, 15); 
-    Terminal.write("\x1b[K"); 
-    Terminal.printf(" Zeile: %d Spalte: %d | Speicher: %d Bytes ", line, col, textLen);
+    fbcolor(0, 15);
+    char puffer[8];
+    Terminal.write("\x1b[K");
+    Terminal.printf("Zeile: %d Spalte: %d  |  Speicher: %d Bytes ", line, col, textLen);
     GFX.waitCompletion(false);
-
-    fbcolor(63, 1); 
+    fbcolor(63, 1);
     tc.setCursorPos(x_pos, y_pos);
     Terminal.enableCursor(Cursor);
   }
@@ -1287,8 +1338,9 @@ extern "C" {
     fbcolor(0, 15);
     delay(2);
     tc.setCursorPos(1, 1);
-    Terminal.write("\x1b[K");                                              //komplette Zeile mit weissem Hintergrund
-    Terminal.printf("ESC=Menu F2:Copy F3:Paste Datei:%s" , currentEditingFilename);
+    Terminal.write("\x1b[K");                                              //komplette Zeile mit cyan Hintergrund
+    GFX.drawText(&fabgl::FONT_5x8, 2, 0, "F1=Menu F2=Copy F3=Paste F4=Suche | ");
+    GFX.drawText(&fabgl::FONT_5x8, 41*5, 0, currentEditingFilename);
     GFX.waitCompletion(false);
     fbcolor(63, 1);
     tc.setCursorPos(1, 2);
@@ -1323,7 +1375,7 @@ extern "C" {
     uint32_t i = topIndex;
     int vgaZeile = 2;
 
-    // zeilenweise durch das Dokument, bis der Bildschirm voll oder Dokument zu Ende 
+    // zeilenweise durch das Dokument, bis der Bildschirm voll oder Dokument zu Ende
     while (i < textLen && vgaZeile <= (MAX_R - 1) ) {
       // 1. Das Ende der aktuellen Zeile im PSRAM suchen
       uint32_t lineEnd = i;
@@ -1394,7 +1446,7 @@ extern "C" {
         } else {
           // Datei existiert nicht -> neu anlegen
           Terminal.printf("Erstelle neue Datei: %s\n\r", filename);
-          vTaskDelay(pdMS_TO_TICKS(500)); 
+          vTaskDelay(pdMS_TO_TICKS(500));
         }
         currentEditingFilename = '\0';                                            // alten Dateinamen löschen
         currentEditingFilename = filename;                                        // Dateiname merken für Titelzeile
@@ -1450,6 +1502,7 @@ extern "C" {
     } else {
       Terminal.println("Fehler: fehlender Dateiname!");
     }
+    lua_gc(L, LUA_GCCOLLECT, 0);                      //nach dem Programm-Speicher aufräumen
     return 0;
   }
 
@@ -1476,7 +1529,7 @@ extern "C" {
         }
         cursorPos++; // cursorPos am Anfang der korrekten Zeile
       }
-      
+
       // ein paar Zeilen weiter nach oben (falls möglich) für besseres visuelles Feedback
       int scrollBack = cursorPos;
       int zeilenGefunden = 0;
@@ -1519,8 +1572,8 @@ extern "C" {
     while (editing) {
       int c = inchar();
 
-      // ESCAPE-Taste (ASCII 27): Menü ODER Pfeiltaste
-      if (c == KEY_ESC) {
+      // ================= F1-TASTE: Menue  ======================================
+      if (c == KEY_F1) {
         EditorMenue();
         while (true) {
           int menuChoice = inchar();
@@ -1617,7 +1670,7 @@ extern "C" {
         }
       }
 
-      // ================= F3-TASTE: ZEILE EINFÜGEN (PASTE) =================
+      // ============================== F3-TASTE: ZEILE EINFÜGEN (PASTE) ================================
       else if (c == KEY_F3) {
         if (clipboardLen > 0 && (textLen + clipboardLen + 1) < (EDIT_BUFF_SIZE - 1)) {
           // Platz im textBuffer schaffen (Kopierter Text + Zeilenumbruch)
@@ -1632,8 +1685,124 @@ extern "C" {
           redrawScreen();
         }
       }
+
+      // ============================== F4-TASTE: Suchbegriff eingeben ==================================
+      else if (c == 6 || c == KEY_F4) {
+        //Terminal.enableCursor(false); // Cursor für das Zeichnen kurz aus
+        String aktuellerBegriff = "";
+
+        // WENN bereits ein Suchbegriff existiert, weitersuchen ?
+        if (letzterSuchBegriff.length() > 0) {
+          // Kleines Overlay-Fenster für die Abfrage zeichnen (oben rechts)
+          int sX = 1, sY = 2, sW = 52, sH = 3;
+
+          // 2. Das Suchfenster zeichnen
+          fbcolor(48, 57);                                                  //roter Rahmen, orange Hintergrund
+          GFX.fillRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
+          GFX.drawRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
+          fbcolor(0, 57);                                                   //schwarzer Text auf orange Hintergrund
+          tc.setCursorPos(sX + 2, sY + 2);
+          Terminal.printf("[ENTER] Weiter nach '%s' | [N] Neu", letzterSuchBegriff.c_str());
+          // Auf Entscheidung warten
+          bool entscheidungAktiv = true;
+          while (entscheidungAktiv) {
+            int sc = inchar();
+            if (sc == 13) {
+              aktuellerBegriff = letzterSuchBegriff;          // Weitersuchen mit dem alten Begriff!
+              entscheidungAktiv = false;
+            } else if (sc == 'n' || sc == 'N') {              // Alten Begriff löschen und neuen eingeben
+              letzterSuchBegriff = "";
+              entscheidungAktiv = false;
+            } else if (sc == KEY_ESC || sc == 27) {
+              aktuellerBegriff = "";                          // Abbrechen
+              entscheidungAktiv = false;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+          }
+          fbcolor(63, 1);
+          redrawScreen();
+        }
+
+        // WENN kein alter Begriff da ist (oder 'N' gedrückt wurde): Neue Eingabe starten
+        if (letzterSuchBegriff.length() == 0 && c != KEY_ESC) {
+          int sX = 1, sY = 2, sW = 52, sH = 3;
+
+          fbcolor(48, 57);                                                  //roter Rahmen, orange Hintergrund
+          GFX.fillRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
+          GFX.drawRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
+          fbcolor(0, 57);                                                   //schwarzer Text auf orange Hintergrund
+          tc.setCursorPos(sX + 2, sY + 2);
+          Terminal.print("Suchen: ");
+
+          bool eingabeAktiv = true;
+          while (eingabeAktiv) {
+            int sc = inchar();
+            if (sc == 13) {
+              eingabeAktiv = false;
+            } else if (sc == KEY_ESC || sc == 27) {
+              aktuellerBegriff = "";
+              eingabeAktiv = false;
+            } else if ((sc == 8 || sc == 127) && aktuellerBegriff.length() > 0) {
+              aktuellerBegriff.remove(aktuellerBegriff.length() - 1);
+              Terminal.write("\b\e[K");
+            } else if (sc >= 32 && sc <= 126 && aktuellerBegriff.length() < 20) {
+              aktuellerBegriff += (char)sc;
+            }
+            tc.setCursorPos(sX + 9, sY + 2);
+            Terminal.print(aktuellerBegriff);//+ "  ");
+          }
+          fbcolor(63, 1);
+          redrawScreen();
+
+          if (aktuellerBegriff.length() > 0) {
+            letzterSuchBegriff = aktuellerBegriff;
+          }
+        }
+
+        // === DIE TATSÄCHLICHE TEXT-SUCHE mit Weitersprung ===
+        if (aktuellerBegriff.length() > 0) {
+          std::string textStr((char*)textBuffer, textLen);
+          size_t fundort = std::string::npos;
+
+          if (cursorPos + 1 < textLen) {                              // WEITERSUCHEN, ab cursorPos + 1
+            fundort = textStr.find(aktuellerBegriff.c_str(), cursorPos + 1);
+          }
+
+          if (fundort == std::string::npos) {                         // Falls am Dateiende angekommen von vorne
+            fundort = textStr.find(aktuellerBegriff.c_str(), 0);
+          }
+
+          if (fundort != std::string::npos) {
+            cursorPos = fundort;
+
+            int zielZeile = 1;
+            for (uint32_t i = 0; i < cursorPos; i++) {                  // Zielzeile ermitteln
+              if (textBuffer[i] == '\n') zielZeile++;
+            }
+            int scrollBack = cursorPos;
+            int zeilenGefunden = 0;
+            while (scrollBack > 0 && zeilenGefunden < 8) {              // topIndex scrollen (8 Zeilen Kontext oben)
+              scrollBack--;
+              if (textBuffer[scrollBack] == '\n') zeilenGefunden++;
+            }
+            topIndex = (scrollBack == 0) ? 0 : (scrollBack + 1);
+            redrawScreen();
+
+            int sichtbareZeile = 1;
+            int checkPos = topIndex;
+            while (checkPos < cursorPos) {
+              if (textBuffer[checkPos] == '\n') sichtbareZeile++;
+              checkPos++;
+            }
+            tc.setCursorPos(1, sichtbareZeile + 1);
+          } else {
+            letzterSuchBegriff = "";                                    // Suchbegriff löschen
+          }
+        }
+        Terminal.enableCursor(true);
+      }
       
-      // ================= PFEIL NACH OBEN ('A') =================
+      // ============================== PFEIL NACH OBEN ('A') ===========================================
       if (c == KEY_UP) {
         if (cursorPos > 0) {
           uint32_t currentX = 0;
@@ -1665,7 +1834,7 @@ extern "C" {
           }
         }
       }
-      // ================= PFEIL NACH UNTEN ('B') =================
+      // ============================== PFEIL NACH UNTEN ('B') ==========================================
       if (c == KEY_DOWN) {
         uint32_t currentX = 0;
         uint32_t p = cursorPos;
@@ -1710,20 +1879,20 @@ extern "C" {
           // ====================================================================
         }
       }
-      // ================= PFEIL NACH RECHTS ('C') =================
+      // ============================== PFEIL NACH RECHTS ('C') =========================================
       else if (c == KEY_RIGHT) {
         if (cursorPos < textLen) {
           cursorPos++;
         }
       }
-      // ================= PFEIL NACH LINKS ('D') =================
+      // ============================== PFEIL NACH LINKS ('D') ==========================================
       else if (c == KEY_LEFT) {
         if (cursorPos > 0) {
           cursorPos--;
         }
       }
 
-      // ================= ENTF-TASTE (KEY_DELETE) =================
+      // ============================== ENTF-TASTE (KEY_DELETE) =========================================
       else if (c == KEY_DELETE) {
         if (cursorPos < textLen) {
 
@@ -1734,7 +1903,7 @@ extern "C" {
             // Den gesamten Textblock im PSRAM nach vorne ziehen
             memmove(&textBuffer[blockStartPos], &textBuffer[blockStartPos + clipboardLen], textLen - (blockStartPos + clipboardLen));
             textLen -= clipboardLen;
-            textBuffer[textLen] = 0; 
+            textBuffer[textLen] = 0;
             cursorPos = blockStartPos;
 
             tc.setCursorPos(1, MAX_R);
@@ -1756,8 +1925,7 @@ extern "C" {
           }
         }
       }
-
-      // ================= PAGE UP ('5') =================
+      // ============================== PAGE UP ('5') ===================================================
       if (c == KEY_PAGE_UP) {
 
         int linesToMove = 20;
@@ -1773,8 +1941,7 @@ extern "C" {
         cursorPos = topIndex;
         redrawScreen();
       }
-
-      // ================= PAGE DOWN ('6') =================
+      // ============================== PAGE DOWN ('6') =================================================
       else if (c == KEY_PAGE_DOWN) {
 
         int linesToMove = 20;
@@ -1825,7 +1992,7 @@ extern "C" {
       tc.setCursorPos(vgaX, vgaY);
       // =======================================================================
 
-      // ================= ENTER-TASTE (ASCII 13) =================
+      // ============================== ENTER-TASTE (ASCII 13) ==========================================
       if (c == 13) {
         if (textLen < (EDIT_BUFF_SIZE - 1)) {
           // Verschiebt den Text hinter dem Cursor um 1 Position nach hinten
@@ -1847,7 +2014,7 @@ extern "C" {
         }
       }
 
-      // ================= BACKSPACE (ASCII 8 ODER 127) =================
+      // ============================== BACKSPACE (ASCII 8 ODER 127) ====================================
       else if (c == 8 || c == 127) {
         if (cursorPos > 0) {
           // Zieht den nachfolgenden Text um 1 Position nach vorne über das gelöschte Zeichen
@@ -1858,7 +2025,7 @@ extern "C" {
         }
       }
 
-      // ================= NORMALES ZEICHEN (DRUCKBARES ASCII) =================
+      // ============================== NORMALES ZEICHEN (DRUCKBARES ASCII) =============================
       else if (c >= 32 && c <= 126) {
         if (textLen < (EDIT_BUFF_SIZE - 1)) {
           // Macht Platz im PSRAM für ein neues Zeichen
@@ -1885,7 +2052,7 @@ extern "C" {
         }
       }
 
-      // ================= OPTISCHE 2D-CURSOR-SYNCHRONISATION =================
+      // ============================== OPTISCHE 2D-CURSOR-SYNCHRONISATION ==============================
       textX = 1;
       pX = cursorPos;
       while (pX > 0 && textBuffer[pX - 1] != '\n') { // ZURÜCK AUF RAM
@@ -1893,7 +2060,7 @@ extern "C" {
         textX++;
       }
 
-      vgaY = 2; 
+      vgaY = 2;
       for (uint32_t i = topIndex; i < cursorPos; i++) {
         if (textBuffer[i] == '\n') { // ZURÜCK AUF RAM
           vgaY++;
@@ -1917,7 +2084,7 @@ extern "C" {
         redrawScreen();
       }
 
-      vgaX = textX - leftColumn + 1;      
+      vgaX = textX - leftColumn + 1;
       updateStatusLine(cursorPos);
       tc.setCursorPos(vgaX, vgaY);
       // =======================================================================
@@ -1925,8 +2092,8 @@ extern "C" {
       vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-    
-    fbcolor(63, 1); 
+
+    fbcolor(63, 1);
     GFX.clear();
     tc.setCursorPos(1, 1);
     Terminal.enableCursor(Cursor);
@@ -2212,7 +2379,7 @@ extern "C" {
   }
   //---------------------------------------------- sd.copy(Datei1,Datei2) ---------------------------------------------------------
 
-  // 6. sd.copy("quelle.lua", "ziel.lua") 
+  // 6. sd.copy("quelle.lua", "ziel.lua")
   int lua_sd_copy(lua_State* L) {
     if (!lua_isstring(L, 1) || !lua_isstring(L, 2)) {
       Terminal.print("FEHLER: Zwei Dateinamen (Strings) erwartet!");
@@ -2366,7 +2533,7 @@ extern "C" {
       return 1;
     }
 
-    int eintragIndex = 1; 
+    int eintragIndex = 1;
 
     while (true) {
       File file = root.openNextFile();
@@ -2391,15 +2558,15 @@ extern "C" {
             strcasecmp(reinerName.c_str(), "FOUND.000") == 0 ||
             strncasecmp(reinerName.c_str(), "._", 2) == 0) {
           file.close();
-          continue; 
+          continue;
         }
       }
       // ============================================================
 
-      
+
       lua_newtable(L);
       lua_pushstring(L, reinerName.c_str());
-      lua_rawseti(L, -2, 1); 
+      lua_rawseti(L, -2, 1);
 
       // Spalte 2: Dateigröße formatieren und hinzufügen
       if (file.isDirectory()) {
@@ -2441,571 +2608,772 @@ extern "C" {
     return 1;
   }
 
-
-  //********************************************** System-Funktionen *****************
-  // ============================================================================
-  // SYSTEM INTERFACE (Modul: sys)
-  // ============================================================================
-
-  // C++ Funktion für system.millis()
-  int lua_sys_timer(lua_State* L) {
-    lua_pushinteger(L, millis());
-    return 1; // 1 Rückgabewert an Lua geliefert
+  // Hilfsfunktion: Findet einen freien Slot für eine Datei
+  static int get_free_file_slot() {
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+      if (!openFiles[i]) return i;
+    }
+    return -1; // Alle Slots voll
   }
 
-  // C++ Brücke: Lädt ein Lua-Skript von der SD-Karte direkt in den Interpreter
-  int lua_sys_load(lua_State* L) {
-    if (!lua_isstring(L, 1)) {
+  // 2. Datei öffnen: local fileHandle = sd.open("song.mp3", "r")
+  int lua_sd_open(lua_State* L) {
+    const char* dateiname = luaL_checkstring(L, 1);
+    const char* modeStr = luaL_optstring(L, 2, "r"); // "r" für Lesen, "w" für Schreiben
+
+    String fullPath = resolve_lua_path(dateiname);
+
+    int slot = get_free_file_slot();
+    if (slot == -1) {
+      return luaL_error(L, "Zu viele Dateien gleichzeitig geoeffnet!");
+    }
+    const char* mode = FILE_READ;
+
+    // ERWEITERUNG: Auch "a" (Append / Anhängen) unterstützen, falls gewünscht
+    if (strcmp(modeStr, "w") == 0 || strcmp(modeStr, "wb") == 0) {
+      mode = FILE_WRITE;
+    } else if (strcmp(modeStr, "a") == 0 || strcmp(modeStr, "ab") == 0) {
+#ifdef FILE_APPEND
+mode = FILE_APPEND;
+#else
+mode = FILE_WRITE; // Fallback
+#endif
+}
+openFiles[slot] = SD.open(fullPath.c_str(), mode);
+if (!openFiles[slot]) {
+lua_pushnil(L); // Datei konnte nicht geöffnet werden
+return 1;
+}
+
+      lua_pushinteger(L, slot); // Slot-Nummer als Handle an Lua zurückgeben
+      return 1;
+    }
+
+    // 3. Bytes aus Datei lesen: local bytesTabelle = sd.read(fileHandle, anzahl_bytes)
+    int lua_sd_read(lua_State* L) {
+      int slot = luaL_checkinteger(L, 1);
+      int requestedCount = luaL_checkinteger(L, 2);
+      if (slot < 0 || slot >= MAX_OPEN_FILES || !openFiles[slot]) {
+        return luaL_error(L, "Ungueltiges Datei-Handle!");
+      }
+
+      if (requestedCount <= 0) return 0;
+      size_t count = (size_t)requestedCount;
+      uint8_t* buffer = nullptr;
+      bool useHeap = (count > 1024);
+
+      if (useHeap) {
+        buffer = (uint8_t*)malloc(count);
+        if (buffer == nullptr) {
+          return luaL_error(L, "Nicht genug Speicher fuer Lese-Puffer!");
+        }
+      } else {
+        buffer = (uint8_t*)alloca(count);
+      }
+
+      // Bytes aus der Datei lesen
+      int bytesRead = openFiles[slot].read(buffer, count);
+
+      if (bytesRead <= 0) {
+        if (useHeap) free(buffer); // Heap-Speicher unbedingt freigeben!
+        lua_pushnil(L); // Dateiende erreicht (EOF)
+        return 1;
+      }
+      lua_newtable(L);
+      lua_createtable(L, bytesRead, 0);
+
+      for (int i = 0; i < bytesRead; i++) {
+        lua_pushinteger(L, buffer[i]);
+        lua_rawseti(L, -2, i + 1); // Lua Indizes sind 1-basiert
+      }
+      if (useHeap) {
+        free(buffer);
+      }
+
+      return 1;
+    }
+
+
+    // 4. Lesezeiger versetzen: sd.seek(fileHandle, absolute_position)
+    int lua_sd_seek(lua_State* L) {
+      int slot = luaL_checkinteger(L, 1);
+      uint32_t pos = (uint32_t)luaL_checkinteger(L, 2);
+      if (slot < 0 || slot >= MAX_OPEN_FILES || !openFiles[slot]) {
+        return luaL_error(L, "Ungueltiges Datei-Handle!");
+      }
+
+      bool success = openFiles[slot].seek(pos);
+      lua_pushboolean(L, success);
+      return 1;
+    }
+
+    // 5. Datei schließen: sd.close(fileHandle)
+    int lua_sd_close(lua_State* L) {
+      int slot = luaL_checkinteger(L, 1);
+      if (slot >= 0 && slot < MAX_OPEN_FILES && openFiles[slot]) {
+        openFiles[slot].close();                                        // Schließt die physische Datei auf der SD-Karte
+        openFiles[slot] = File();
+      } else {
+        return luaL_error(L, "Ungueltiges Datei-Handle beim Schliessen!");
+      }
+      return 0;
+    }
+
+    // 6. Bytes/Text in Datei schreiben: local geschrieben = sd.write(fileHandle, string_oder_tabelle)
+    int lua_sd_write(lua_State* L) {
+      int slot = luaL_checkinteger(L, 1);
+      if (slot < 0 || slot >= MAX_OPEN_FILES || !openFiles[slot]) {
+        return luaL_error(L, "Ungueltiges Datei-Handle!");
+      }
+      size_t bytesWritten = 0;
+      // Fall A: Es wird ein String (Text) übergeben
+      if (lua_isstring(L, 2)) {
+        size_t len;
+        const char* text = lua_tolstring(L, 2, &len);
+        bytesWritten = openFiles[slot].write((const uint8_t*)text, len);
+      }
+      // Fall B: Es wird eine Tabelle (Byte-Array) übergeben
+      else if (lua_istable(L, 2)) {
+        size_t len = lua_rawlen(L, 2);
+        if (len > 0) {
+          uint8_t* buffer = nullptr;
+          bool useHeap = (len > 1024);
+          if (useHeap) {
+            buffer = (uint8_t*)malloc(len);
+            if (buffer == nullptr) {
+              return luaL_error(L, "Nicht genug Speicher fuer Schreib-Puffer!");
+            }
+          } else {
+            buffer = (uint8_t*)alloca(len);
+          }
+          for (size_t i = 1; i <= len; i++) {
+            lua_rawgeti(L, 2, i);
+            buffer[i - 1] = (uint8_t)lua_tointeger(L, -1);
+            lua_pop(L, 1);
+          }
+          bytesWritten = openFiles[slot].write(buffer, len);
+
+          if (useHeap) {
+            free(buffer);
+          }
+        }
+      }
+      else {
+        return luaL_error(L, "Zweites Argument String oder Tabelle sein!");
+      }
+      lua_pushinteger(L, bytesWritten); // Anzahl geschriebener Bytes an Lua zurückgeben
+      return 1;
+    }
+
+    // 11. Funktion für sd.readline(dateiname) -> Die gesamte Datei zeilenweise in eine Tabelle laden
+    int lua_sd_read_lines(lua_State* L) {
+      const char* dateiname = luaL_checkstring(L, 1);
+      String Pfad = resolve_lua_path(dateiname);
+      File datei = SD.open(Pfad.c_str(), FILE_READ);
+      if (!datei) {
+        lua_pushnil(L);
+        return 1;
+      }
+      lua_newtable(L);                                              // Eine neue, Lua-Tabelle erstellen
+      int zeilen_index = 1;
+      while (datei.available() > 0) {
+        String zeile = datei.readStringUntil('\n');
+        if (zeile.endsWith("\r")) {
+          zeile.remove(zeile.length() - 1);
+        }
+        if (zeile.length() > 0 || datei.available() > 0) {
+          lua_pushstring(L, zeile.c_str());
+          lua_rawseti(L, -2, zeilen_index);                         // tabelle[zeilen_index] = zeile
+          zeilen_index++;
+        }
+      }
+      datei.close();
+      return 1;
+    }
+    //********************************************** System-Funktionen *****************
+    // ============================================================================
+    // SYSTEM INTERFACE (Modul: sys)
+    // ============================================================================
+
+    // C++ Funktion für system.millis()
+    int lua_sys_timer(lua_State* L) {
+      lua_pushinteger(L, millis());
+      return 1; // 1 Rückgabewert an Lua geliefert
+    }
+
+    // C++ Brücke: Lädt ein Lua-Skript von der SD-Karte direkt in den Interpreter
+    int lua_sys_load(lua_State* L) {
+      if (!lua_isstring(L, 1)) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Dateiname fehlt!");
+        return 2;
+      }
+
+      String filename = lua_tostring(L, 1);
+
+      if (!filename.startsWith("/")) {
+        filename = "/" + filename;
+      }
+
+      if (SD.exists(filename.c_str())) {                                                  // Datei auf SD-Karte prüfen
+        File file = SD.open(filename.c_str(), FILE_READ);
+        if (file) {
+          size_t fileSize = file.size();
+
+          char* buffer = (char*)malloc(fileSize + 1);                                     // Speicher im RAM fuer das Skript reservieren
+          if (buffer) {
+            file.readBytes(buffer, fileSize);
+            buffer[fileSize] = '\0';
+            file.close();
+            int status = luaL_loadbuffer(L, buffer, fileSize, filename.c_str());          // geladenen Text an Lua uebergeben
+            free(buffer);                                                                 // Puffer sofort freigeben, um RAM zu schonen
+
+            if (status == LUA_OK) {
+              lua_pushnil(L);
+
+              return 2;                                                                   // 2 Werte an Lua zurueckgeben! (chunk, nil)
+            } else {
+              const char* err = lua_tostring(L, -1);
+              Terminal.print(" -> LUA SYNTAXFEHLER IN DATEI: ");
+              Terminal.println(err);
+              lua_pushnil(L);
+              lua_pushstring(L, err);
+              return 2;
+            }
+          }
+          file.close();
+        }
+      }
+
+      Terminal.print("Fehler: Nicht auf SD-Karte vorhanden!\n\r");
       lua_pushnil(L);
-      lua_pushstring(L, "Dateiname fehlt!");
+      lua_pushstring(L, "Datei existiert nicht!");
       return 2;
     }
 
-    String filename = lua_tostring(L, 1);
 
-    if (!filename.startsWith("/")) {
-      filename = "/" + filename;
+    // -------- sys.gettime() ------------
+    int sys_get_time(lua_State* L) {
+      uint32_t unixZeit = e_rtc.getEpoch();
+      //unixZeit += 3600;     //Winterzeit / Zeitzonen-Anpassung, falls nötig
+
+      // Berechnung der Uhrzeit über reine Mathematik
+      int sekunden = unixZeit % 60;
+      int minuten  = (unixZeit / 60) % 60;
+      int stunden  = (unixZeit / 3600) % 24;
+
+      // NEU: Die drei Werte einzeln als Ganzzahlen auf den Lua-Stack legen
+      lua_pushinteger(L, stunden);
+      lua_pushinteger(L, minuten);
+      lua_pushinteger(L, sekunden);
+
+      return 3; // 3 Rückgabewerte an Lua (Stunden, Minuten, Sekunden)
+    }
+    // -------- sys.getdate() -----------
+    int sys_get_date(lua_State* L) {
+      time_t rawtime = e_rtc.getEpoch();
+      rawtime += 3600;                          // Zeitzonenausgleich (+1 Stunde für Deutschland-Winterzeit)
+      struct tm* timeinfo = gmtime(&rawtime);   // gmtime nutzt native C-Bibliothek des Teensy-Compilers
+
+      int tag   = timeinfo->tm_mday;
+      int monat = timeinfo->tm_mon + 1;       // tm_mon zählt von 0 bis 11 -> korrigieren auf 1-12
+      int jahr  = timeinfo->tm_year + 1900;   // tm_year zählt seit 1900 -> auf echtes Jahr korrigieren
+
+      // Die drei Werte einzeln als Ganzzahlen auf den Lua-Stack legen
+      lua_pushinteger(L, tag);
+      lua_pushinteger(L, monat);
+      lua_pushinteger(L, jahr);
+
+      return 3; // 3 Rückgabewerte an Lua (Tag, Monat, Jahr)
     }
 
-    if (SD.exists(filename.c_str())) {                                                  // Datei auf SD-Karte prüfen
-      File file = SD.open(filename.c_str(), FILE_READ);
-      if (file) {
-        size_t fileSize = file.size();
+    //********************************************** System-Funktionen *****************
+    // ============================================================================
+    // SYSTEM INTERFACE
+    // ============================================================================
+    int NoteToFreq(int mnote)
+    {
+      if (mnote < 0)   mnote = 0;
+      if (mnote > 127) mnote = 127; // Begrenzung auf Standard-MIDI-Bereich
 
-        char* buffer = (char*)malloc(fileSize + 1);                                     // Speicher im RAM fuer das Skript reservieren
-        if (buffer) {
-          file.readBytes(buffer, fileSize);
-          buffer[fileSize] = '\0';
-          file.close();
-          int status = luaL_loadbuffer(L, buffer, fileSize, filename.c_str());          // geladenen Text an Lua uebergeben
-          free(buffer);                                                                 // Puffer sofort freigeben, um RAM zu schonen
+      int octave = mnote / 12;
+      int noteIndex = mnote - (octave * 12);
 
-          if (status == LUA_OK) {
-            lua_pushnil(L);
-
-            return 2;                                                                   // 2 Werte an Lua zurueckgeben! (chunk, nil)
-          } else {
-            const char* err = lua_tostring(L, -1);
-            Terminal.print(" -> LUA SYNTAXFEHLER IN DATEI: ");
-            Terminal.println(err);
-            lua_pushnil(L);
-            lua_pushstring(L, err);
-            return 2;
-          }
-        }
-        file.close();
+      if (octave > 8) {
+        return noteTable[noteIndex] << (octave - 8);
+      } else {
+        return noteTable[noteIndex] >> (8 - octave);
       }
     }
 
-    Terminal.print("Fehler: Nicht auf SD-Karte vorhanden!\n\r");
-    lua_pushnil(L);
-    lua_pushstring(L, "Datei existiert nicht!");
-    return 2;
-  }
+    // -------- sound(kanal, note, dauer, lautstaerke) ----------------------------
+    int lua_sound(lua_State* L) {
+      // 1. Die 4 Argumente von Lua abgreifen (wirft automatisch einen Lua-Fehler, falls Argumente fehlen)
+      int kanal      = luaL_checkinteger(L, 1);
+      int note       = luaL_checkinteger(L, 2);
+      int dauer      = luaL_checkinteger(L, 3);
+      int lautstaerke = luaL_checkinteger(L, 4);
 
+      // 2. Sicherheits-Begrenzungen (analog zu Ihrem Original-Code)
+      if (kanal > 5)       kanal = 5;
+      if (kanal < 0)       kanal = 0;
+      if (lautstaerke > 127) lautstaerke = 127;
+      if (lautstaerke < 0)   lautstaerke = 0;
 
-  // -------- sys.gettime() ------------
-  int sys_get_time(lua_State* L) {
-    uint32_t unixZeit = e_rtc.getEpoch();
-    //unixZeit += 3600;     //Winterzeit / Zeitzonen-Anpassung, falls nötig
-
-    // Berechnung der Uhrzeit über reine Mathematik
-    int sekunden = unixZeit % 60;
-    int minuten  = (unixZeit / 60) % 60;
-    int stunden  = (unixZeit / 3600) % 24;
-
-    // NEU: Die drei Werte einzeln als Ganzzahlen auf den Lua-Stack legen
-    lua_pushinteger(L, stunden);
-    lua_pushinteger(L, minuten);
-    lua_pushinteger(L, sekunden);
-
-    return 3; // 3 Rückgabewerte an Lua (Stunden, Minuten, Sekunden)
-  }
-  // -------- sys.getdate() -----------
-  int sys_get_date(lua_State* L) {
-    time_t rawtime = e_rtc.getEpoch();
-    rawtime += 3600;                          // Zeitzonenausgleich (+1 Stunde für Deutschland-Winterzeit)
-    struct tm* timeinfo = gmtime(&rawtime);   // gmtime nutzt native C-Bibliothek des Teensy-Compilers
-
-    int tag   = timeinfo->tm_mday;
-    int monat = timeinfo->tm_mon + 1;       // tm_mon zählt von 0 bis 11 -> korrigieren auf 1-12
-    int jahr  = timeinfo->tm_year + 1900;   // tm_year zählt seit 1900 -> auf echtes Jahr korrigieren
-
-    // Die drei Werte einzeln als Ganzzahlen auf den Lua-Stack legen
-    lua_pushinteger(L, tag);
-    lua_pushinteger(L, monat);
-    lua_pushinteger(L, jahr);
-
-    return 3; // 3 Rückgabewerte an Lua (Tag, Monat, Jahr)
-  }
-
-  //********************************************** System-Funktionen *****************
-  // ============================================================================
-  // SYSTEM INTERFACE
-  // ============================================================================
-  int NoteToFreq(int mnote)
-  {
-    if (mnote < 0)   mnote = 0;
-    if (mnote > 127) mnote = 127; // Begrenzung auf Standard-MIDI-Bereich
-
-    int octave = mnote / 12;
-    int noteIndex = mnote - (octave * 12);
-
-    if (octave > 8) {
-      return noteTable[noteIndex] << (octave - 8);
-    } else {
-      return noteTable[noteIndex] >> (8 - octave);
+      // Note in Frequenz (Hz) umrechnen
+      int frequenz = NoteToFreq(note);
+      // Format: \e_S <Kanal> ; <Frequenz> ; <Dauer_ms> ; <Lautstärke> $
+      String seq = "\e_S" + String(kanal) + ";" + String(frequenz) + ";" + String(dauer) + ";" + String(lautstaerke) + "$";
+      Terminal.print(seq);
+      return 0; // Keine Rückgabewerte an Lua
     }
-  }
+    //************************************* Inchar *************************************
+    static int inchar()
+    {
+      while (1) {
+        if (Terminal.available()) {
+          char c = Terminal.read();
 
-  // -------- sound(kanal, note, dauer, lautstaerke) ----------------------------
-  int lua_sound(lua_State* L) {
-    // 1. Die 4 Argumente von Lua abgreifen (wirft automatisch einen Lua-Fehler, falls Argumente fehlen)
-    int kanal      = luaL_checkinteger(L, 1);
-    int note       = luaL_checkinteger(L, 2);
-    int dauer      = luaL_checkinteger(L, 3);
-    int lautstaerke = luaL_checkinteger(L, 4);
+          // Wenn ein ESC-Zeichen (ASCII 27) reinkommt, folgt evtl. eine Sequenz
+          if (c == 27) {
+            // Kurz warten, um zu sehen, ob weitere Zeichen der Sequenz im Puffer landen
+            uint32_t timeout = millis() + 10;
+            while (!Terminal.available() && millis() < timeout) {
+              vTaskDelay(pdMS_TO_TICKS(1));
+            }
 
-    // 2. Sicherheits-Begrenzungen (analog zu Ihrem Original-Code)
-    if (kanal > 5)       kanal = 5;
-    if (kanal < 0)       kanal = 0;
-    if (lautstaerke > 127) lautstaerke = 127;
-    if (lautstaerke < 0)   lautstaerke = 0;
+            // Wenn nach 10ms kein weiteres Zeichen kommt, war es die echte ESC-Taste!
+            if (!Terminal.available()) {
+              return KEY_ESC;
+            }
 
-    // Note in Frequenz (Hz) umrechnen
-    int frequenz = NoteToFreq(note);
-    // Format: \e_S <Kanal> ; <Frequenz> ; <Dauer_ms> ; <Lautstärke> $
-    String seq = "\e_S" + String(kanal) + ";" + String(frequenz) + ";" + String(dauer) + ";" + String(lautstaerke) + "$";
-    Terminal.print(seq);
-    return 0; // Keine Rückgabewerte an Lua
-  }
-  //************************************* Inchar *************************************
-static int inchar()
-{
-  while (1) {
-    if (Terminal.available()) {
-      char c = Terminal.read();
+            // Das nächste Zeichen lesen (meistens '[' oder 'O' bei F-Tasten)
+            char next1 = Terminal.read();
 
-      // Wenn ein ESC-Zeichen (ASCII 27) reinkommt, folgt evtl. eine Sequenz
-      if (c == 27) {
-        // Kurz warten, um zu sehen, ob weitere Zeichen der Sequenz im Puffer landen
-        uint32_t timeout = millis() + 10;
-        while (!Terminal.available() && millis() < timeout) {
-          vTaskDelay(pdMS_TO_TICKS(1));
-        }
+            if (next1 == '[') {
+              while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+              char next2 = Terminal.read();
 
-        // Wenn nach 10ms kein weiteres Zeichen kommt, war es die echte ESC-Taste!
-        if (!Terminal.available()) {
-          return KEY_ESC;
-        }
+              // 1. Pfeiltasten prüfen
+              if (next2 == 'A') return KEY_UP;
+              if (next2 == 'B') return KEY_DOWN;
+              if (next2 == 'C') return KEY_RIGHT;
+              if (next2 == 'D') return KEY_LEFT;
+              if (next2 == 'H') return KEY_HOME;
+              if (next2 == 'F') return KEY_END;
 
-        // Das nächste Zeichen lesen (meistens '[' oder 'O' bei F-Tasten)
-        char next1 = Terminal.read();
-
-        if (next1 == '[') {
-          while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-          char next2 = Terminal.read();
-
-          // 1. Pfeiltasten prüfen
-          if (next2 == 'A') return KEY_UP;
-          if (next2 == 'B') return KEY_DOWN;
-          if (next2 == 'C') return KEY_RIGHT;
-          if (next2 == 'D') return KEY_LEFT;
-          if (next2 == 'H') return KEY_HOME;
-          if (next2 == 'F') return KEY_END;
-
-          // 2. Tasten mit einfacher, direkter Tilde (ENTF, PageUp, PageDown)
-          if (next2 == '3' || next2 == '5' || next2 == '6') {
-            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-            char tilde = Terminal.read(); // Das '~' verwerfen
-            if (next2 == '3') return KEY_DELETE;
-            if (next2 == '5') return KEY_PAGE_UP;
-            if (next2 == '6') return KEY_PAGE_DOWN;
-          }
-
-          // 3. Funktionstasten F5 bis F12 (Zwei-Ziffern-Sequenzen sicher lesen)
-          if (next2 == '1' || next2 == '2') {
-            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-            char next3 = Terminal.read(); // Die zweite Ziffer lesen (z.B. '5' bei F5 oder '3' bei F11)
-            
-            while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-            char tilde = Terminal.read(); // Das abschließende '~' lesen und verwerfen
-
-            if (tilde == '~') {
-              if (next2 == '1') {
-                if (next3 == '5') return KEY_F5;
-                if (next3 == '7') return KEY_F6;
-                if (next3 == '8') return KEY_F7;
-                if (next3 == '9') return KEY_F8;
+              // 2. Tasten mit einfacher, direkter Tilde (ENTF, PageUp, PageDown)
+              if (next2 == '3' || next2 == '5' || next2 == '6') {
+                while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+                char tilde = Terminal.read(); // Das '~' verwerfen
+                if (next2 == '3') return KEY_DELETE;
+                if (next2 == '5') return KEY_PAGE_UP;
+                if (next2 == '6') return KEY_PAGE_DOWN;
               }
-              if (next2 == '2') {
-                if (next3 == '0') return KEY_F9;
-                if (next3 == '1') {speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp"); return KEY_F10;}
-                if (next3 == '3') return KEY_F11; 
-                if (next3 == '4') return KEY_F12; 
+
+              // 3. Funktionstasten F5 bis F12 (Zwei-Ziffern-Sequenzen sicher lesen)
+              if (next2 == '1' || next2 == '2') {
+                while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+                char next3 = Terminal.read(); // Die zweite Ziffer lesen (z.B. '5' bei F5 oder '3' bei F11)
+
+                while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+                char tilde = Terminal.read(); // Das abschließende '~' lesen und verwerfen
+
+                if (tilde == '~') {
+                  if (next2 == '1') {
+                    if (next3 == '5') return KEY_F5;
+                    if (next3 == '7') return KEY_F6;
+                    if (next3 == '8') return KEY_F7;
+                    if (next3 == '9') return KEY_F8;
+                  }
+                  if (next2 == '2') {
+                    if (next3 == '0') return KEY_F9;
+                    if (next3 == '1') {
+                      speichere_bildschirm_als_bmp(0, 0, 320, 240, "screen.bmp");
+                      return KEY_F10;
+                    }
+                    if (next3 == '3') return KEY_F11;
+                    if (next3 == '4') return KEY_F12;
+                  }
+                }
               }
             }
+            // VT100 / Xterm Modus für F1 bis F4
+            else if (next1 == 'O') {
+              while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
+              char next2 = Terminal.read();
+              if (next2 == 'P') return KEY_F1;
+              if (next2 == 'Q') return KEY_F2;
+              if (next2 == 'R') return KEY_F3;
+              if (next2 == 'S') return KEY_F4;
+            }
+
+            // Falls die Sequenz unbekannt oder unvollständig war
+            return 0;
           }
-        }
-        // VT100 / Xterm Modus für F1 bis F4
-        else if (next1 == 'O') {
-          while (!Terminal.available()) vTaskDelay(pdMS_TO_TICKS(1));
-          char next2 = Terminal.read();
-          if (next2 == 'P') return KEY_F1;
-          if (next2 == 'Q') return KEY_F2;
-          if (next2 == 'R') return KEY_F3;
-          if (next2 == 'S') return KEY_F4;
+
+          // Jedes normale ASCII-Zeichen direkt zurückgeben
+          return c;
         }
 
-        // Falls die Sequenz unbekannt oder unvollständig war
-        return 0;
+        vTaskDelay(pdMS_TO_TICKS(5)); // CPU-Entlastung im Loop
       }
-
-      // Jedes normale ASCII-Zeichen direkt zurückgeben
-      return c;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(5)); // CPU-Entlastung im Loop
+void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
+  (void)ud;
+
+  // Fall 1: Speicher soll komplett freigegeben werden (nsize == 0)
+  if (nsize == 0) {
+    if (ptr != nullptr) {
+      free(ptr);
+      // Wenn ptr gültig war, war die echte alte Größe 'osize'
+      if (luaCurrentMemoryUsage >= osize) {
+        luaCurrentMemoryUsage -= osize;
+      } else {
+        luaCurrentMemoryUsage = 0;
+      }
+    }
+    return nullptr;
+  }
+
+  // Fall 2: Speicher wird neu angefordert oder verändert
+  else {
+    size_t tatsaechliche_alte_groesse = (ptr == nullptr) ? 0 : osize;
+
+    long long differenz = (long long)nsize - (long long)tatsaechliche_alte_groesse;
+
+    // Wenn der Speicher wächst, prüfen wir das konfigurierte Limit
+    if (differenz > 0) {
+      if ((luaCurrentMemoryUsage + differenz) > LUA_MAX_PSRAM) {
+        Terminal.println("[LUA] Speicherlimit im PSRAM erreicht!");
+        return nullptr;
+      }
+    }
+
+    // Die eigentliche Allokation/Größenänderung im PSRAM durchführen
+    void* new_ptr = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM);
+
+    // Zähler NUR aktualisieren, wenn der ESP32 den Speicher auch wirklich erhalten hat
+    if (new_ptr != nullptr) {
+      luaCurrentMemoryUsage += differenz;
+    } else {
+      Terminal.println("[LUA] ESP32 PSRAM-Allokationsfehler (Fragmentierung?)");
+    }
+
+    return new_ptr;
   }
 }
+/*
+    void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
+      (void)ud;
 
-
-  void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
-    (void)ud;
-
-    // Fall 1: Speicher soll komplett freigegeben werden
-    if (nsize == 0) {
-      if (ptr != nullptr) {
-        free(ptr);
-        // Wir ziehen die alte Größe vom Lua-Verbrauch ab
-        if (luaCurrentMemoryUsage >= osize) {
-          luaCurrentMemoryUsage -= osize;
-        } else {
-          luaCurrentMemoryUsage = 0;
-        }
-      }
-      return nullptr;
-    }
-
-    // Fall 2: Speicher wird neu angefordert oder verändert (realloc)
-    else {
-      long long differenz = (long long)nsize - (long long)osize;
-
-      // Wenn es eine Vergrößerung ist, prüfen wir das Limit
-      if (differenz > 0) {
-        if ((luaCurrentMemoryUsage + differenz) > LUA_MAX_PSRAM) {
-          Terminal.println("[LUA] Speicherlimit im PSRAM erreicht!");
-          return nullptr;
-        }
-      }
-
-      // Die eigentliche Allokation im PSRAM ausführen
-      void* new_ptr = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM);
-      // Nur wenn die Allokation erfolgreich war, Zähler aktualisieren
-      if (new_ptr != nullptr) {
-        luaCurrentMemoryUsage += differenz;
-      }
-      return new_ptr;
-    }
-  }
-
-  void luaComputerTask(void * parameter) {
-    bool ln = true;
-    int c;
-
-    //L = luaL_newstate();
-
-    lua_State *L = lua_newstate(lua_psram_allocator, nullptr, 0);
-
-    if (L == nullptr) {
-      Terminal.println("CRITICAL ERROR: Lua konnte nicht im PSRAM gestartet werden!");
-      vTaskDelete(nullptr);
-    }
-
-
-    //-------------------------------- Lua-Registrierungen ----------------------------
-    //luaL_openlibs(L);
-    luaL_requiref(L, "_G", luaopen_base, 1);      // Basis-Funktionen (assert, type, print, etc.)
-    lua_pop(L, 1);
-
-    luaL_requiref(L, "math", luaopen_math, 1);    // Mathematische Funktionen (sin, cos, random...)
-    lua_pop(L, 1);
-
-    luaL_requiref(L, "string", luaopen_string, 1);// String-Manipulationen
-    lua_pop(L, 1);
-
-    luaL_requiref(L, "table", luaopen_table, 1);  // Tabellen-Funktionen (insert, remove...)
-    lua_pop(L, 1);
-
-    luaL_requiref(L, "package", luaopen_package, 1); // Aktiviert require() und package
-    lua_pop(L, 1);
-
-    lua_register(L, "print",    lua_custom_print);
-    lua_register(L, "write",    lua_custom_write);
-    lua_register(L, "delay",    lua_delay);
-    lua_register(L, "delayus",  lua_delay_us);
-    lua_register(L, "inkey",    lua_global_inkey);
-    lua_register(L, "waitkey",  lua_global_waitkey);
-    lua_register(L, "edit",     lua_cmd_edit);
-    lua_register(L, "run",      lua_dofile);
-    lua_register(L, "sound",    lua_sound);
-    lua_register(L, "info",     lua_info);
-
-
-    lua_newtable(L);
-    lua_pushcfunction(L, lua_vga_color);         lua_setfield(L, -2, "color");
-    lua_pushcfunction(L, lua_vga_pset);          lua_setfield(L, -2, "pset");
-    lua_pushcfunction(L, lua_vga_line);          lua_setfield(L, -2, "line");
-    lua_pushcfunction(L, lua_vga_rect);          lua_setfield(L, -2, "rect");
-    lua_pushcfunction(L, lua_vga_box);           lua_setfield(L, -2, "box");
-    lua_pushcfunction(L, lua_vga_ellipse);       lua_setfield(L, -2, "ellipse");
-    lua_pushcfunction(L, lua_vga_filledellipse); lua_setfield(L, -2, "fillellipse");
-    lua_pushcfunction(L, lua_vga_text);          lua_setfield(L, -2, "text");
-    lua_pushcfunction(L, lua_vga_cls);           lua_setfield(L, -2, "cls");
-    lua_pushcfunction(L, lua_vga_pos);           lua_setfield(L, -2, "pos");
-    lua_pushcfunction(L, lua_vga_get_colors);    lua_setfield(L, -2, "gcolor");
-    lua_pushcfunction(L, lua_vga_wait_vsync);    lua_setfield(L, -2, "waitsync");
-    lua_pushcfunction(L, lua_vga_set_title);     lua_setfield(L, -2, "setTitle");
-    lua_pushcfunction(L, lua_vga_set_status);    lua_setfield(L, -2, "setStatus");
-    lua_pushcfunction(L, lua_vga_close_window);  lua_setfield(L, -2, "closeWindow");
-    lua_pushcfunction(L, lua_vga_open_window);   lua_setfield(L, -2, "openWindow");
-    lua_pushcfunction(L, lua_vga_update_window); lua_setfield(L, -2, "updateWindow");
-    lua_pushcfunction(L, lua_vga_cursor_onoff);  lua_setfield(L, -2, "cursor");
-    lua_pushcfunction(L, lua_vga_bmpload);       lua_setfield(L, -2, "bmpLoad");
-    lua_pushcfunction(L, lua_vga_bmpsave);       lua_setfield(L, -2, "bmpSave");
-
-    lua_setglobal(L, "vga");        // Die Tabelle "vga" registrieren
-
-    lua_newtable(L);
-    lua_pushcfunction(L, lua_sys_timer);         lua_setfield(L, -2, "timer");
-    lua_pushcfunction(L, lua_sys_load);          lua_setfield(L, -2, "load");
-    lua_pushcfunction(L, sys_get_time);          lua_setfield(L, -2, "gettime");
-    lua_pushcfunction(L, sys_get_date);          lua_setfield(L, -2, "getdate");
-
-    // Die Tabelle global unter dem Namen "sys" registrieren
-    lua_setglobal(L, "sys");
-
-
-    // Eine neue Tabelle für die SD-Bibliothek in Lua erstellen
-    lua_newtable(L);
-    // Die C++ Funktionen der Tabelle zuweisen
-    lua_pushcfunction(L, lua_sd_ls);     lua_setfield(L, -2, "ls");
-    lua_pushcfunction(L, lua_sd_remove); lua_setfield(L, -2, "remove");
-    lua_pushcfunction(L, lua_sd_mkdir);  lua_setfield(L, -2, "mkdir");
-    lua_pushcfunction(L, lua_sd_rmdir);  lua_setfield(L, -2, "rmdir");
-    lua_pushcfunction(L, lua_sd_cd);     lua_setfield(L, -2, "cd");
-    lua_pushcfunction(L, lua_sd_copy);   lua_setfield(L, -2, "copy");
-    lua_pushcfunction(L, lua_sd_rename); lua_setfield(L, -2, "rename");
-    lua_pushcfunction(L, lua_sd_exists); lua_setfield(L, -2, "exist");
-    //              lua_pushcfunction(L, lua_sd_append); lua_setfield(L, -2, "append");
-    //              lua_pushcfunction(L, lua_sd_write);  lua_setfield(L, -2, "write");
-    //              lua_pushcfunction(L, lua_sd_read_lines); lua_setfield(L, -2, "readline");
-    lua_pushcfunction(L, lua_sd_mount);   lua_setfield(L, -2, "mount");
-    lua_pushcfunction(L, lua_sd_unmount); lua_setfield(L, -2, "unmount");
-    lua_pushcfunction(L, lua_sd_cat);     lua_setfield(L, -2, "cat");
-    lua_pushcfunction(L, lua_sd_get_file_list); lua_setfield(L, -2, "listfile");
-    lua_pushcfunction(L, lua_sd_pwd);     lua_setfield(L, -2, "pwd");
-    //              lua_pushcfunction(L, lua_sd_open);    lua_setfield(L, -2, "open");
-    //              lua_pushcfunction(L, lua_sd_read);    lua_setfield(L, -2, "read");
-    //              lua_pushcfunction(L, lua_sd_seek);    lua_setfield(L, -2, "seek");
-    //              lua_pushcfunction(L, lua_sd_close);   lua_setfield(L, -2, "close");
-
-    lua_setglobal(L, "sd");         // Die Tabelle global unter dem Namen "sd" registrieren
-
-    //---------------------------------------------------------------------------------
-
-    // ========================================================================
-    // AUTOMATISCHER START: init.lua von SD-Karte laden und ausführen
-    // ========================================================================
-    if (SD.exists("/lua/init.lua")) {
-      File bootFile = SD.open("/lua/init.lua", FILE_READ);
-      if (bootFile) {
-        size_t fileSize = bootFile.size();
-
-        char* bootBuffer = (char*)malloc(fileSize + 1);         // Dynamischen temporären Speicher im RAM1 für den Boot-Text anfordern
-        if (bootBuffer != NULL) {
-          bootFile.readBytes(bootBuffer, fileSize);
-          bootBuffer[fileSize] = '\0';
-          bootFile.close();
-
-          if (luaL_dostring(L, bootBuffer) != LUA_OK) {         // Übergabe des geladenen Text-Strings an den Lua-Kern
-            const char* error_msg = lua_tostring(L, -1);
-            Terminal.print("Fehler in init.lua: ");
-            Terminal.println(error_msg);
-            lua_pop(L, 1);
+      // Fall 1: Speicher soll komplett freigegeben werden
+      if (nsize == 0) {
+        if (ptr != nullptr) {
+          free(ptr);
+          // Wir ziehen die alte Größe vom Lua-Verbrauch ab
+          if (luaCurrentMemoryUsage >= osize) {
+            luaCurrentMemoryUsage -= osize;
+          } else {
+            luaCurrentMemoryUsage = 0;
           }
-          free(bootBuffer);                                     // Speicher wieder freigeben
-        } else {
-          Terminal.println("Fehler: Zu wenig RAM fuer Boot-Puffer!\n\r");
-          bootFile.close();
         }
-      } else {
-        Terminal.println("Fehler: Konnte init.lua nicht oeffnen!\n\r");
+        return nullptr;
+      }
+
+      // Fall 2: Speicher wird neu angefordert oder verändert (realloc)
+      else {
+        long long differenz = (long long)nsize - (long long)osize;
+
+        // Wenn es eine Vergrößerung ist, prüfen wir das Limit
+        if (differenz > 0) {
+          if ((luaCurrentMemoryUsage + differenz) > LUA_MAX_PSRAM) {
+            Terminal.println("[LUA] Speicherlimit im PSRAM erreicht!");
+            return nullptr;
+          }
+        }
+
+        // Die eigentliche Allokation im PSRAM ausführen
+        void* new_ptr = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM);
+        // Nur wenn die Allokation erfolgreich war, Zähler aktualisieren
+        if (new_ptr != nullptr) {
+          luaCurrentMemoryUsage += differenz;
+        }
+        return new_ptr;
       }
     }
-    Terminal.print("> ");                                         //Eingabeprompt
-    Terminal.enableCursor(Cursor);
+    */
 
-    while (true) {
-      while (ln) {
-        c = inchar();
-        switch (c) {
-          case 13:
-            inputBuffer += '\0';
-            Terminal.println();
-            ln = false;
-            break;
+    void luaComputerTask(void * parameter) {
+      bool ln = true;
+      int c;
+      //L = luaL_newstate();
+      lua_State *L = lua_newstate(lua_psram_allocator, nullptr, 0);
+      if (L == nullptr) {
+        Terminal.println("CRITICAL ERROR: Lua konnte nicht im PSRAM gestartet werden!");
+        vTaskDelete(nullptr);
+      }
+      //-------------------------------- Lua-Registrierungen ----------------------------
+      //-------------------------------- Lua Standard-Libs ------------------------------
+      luaL_requiref(L, "_G", luaopen_base, 1);      // Basis-Funktionen (assert, type, print, etc.)
+      lua_pop(L, 1);
+      luaL_requiref(L, "math", luaopen_math, 1);    // Mathematische Funktionen (sin, cos, random...)
+      lua_pop(L, 1);
+      luaL_requiref(L, "string", luaopen_string, 1);// String-Manipulationen
+      lua_pop(L, 1);
+      luaL_requiref(L, "table", luaopen_table, 1);  // Tabellen-Funktionen (insert, remove...)
+      lua_pop(L, 1);
+      luaL_requiref(L, "package", luaopen_package, 1); // Aktiviert require() und package
+      lua_pop(L, 1);
+      //-------------------------------- Lua globale Funktionen -------------------------
+      lua_register(L, "print",    lua_custom_print);      //Ausgabe mit Zeilenumbruch
+      lua_register(L, "write",    lua_custom_write);      //Ausgabe ohne Zeilenumbruch
+      lua_register(L, "delay",    lua_delay);             //ms delay
+      lua_register(L, "delayus",  lua_delay_us);          //us delay
+      lua_register(L, "inkey",    lua_global_inkey);      //letzter Tastencode
+      lua_register(L, "waitkey",  lua_global_waitkey);    //Tasteneingabe abwarten
+      lua_register(L, "edit",     lua_cmd_edit);          //Fullscreen-Editor
+      lua_register(L, "run",      lua_dofile);            //Lua-Skript ausführen
+      lua_register(L, "sound",    lua_sound);             //Sound-Funktion
+      lua_register(L, "info",     lua_info);              //Speicher-Informationen
+      //-------------------------------- Lua vga-Funktionen -----------------------------
+      lua_newtable(L);
+      lua_pushcfunction(L, lua_vga_color);         lua_setfield(L, -2, "color");
+      lua_pushcfunction(L, lua_vga_pset);          lua_setfield(L, -2, "pset");
+      lua_pushcfunction(L, lua_vga_line);          lua_setfield(L, -2, "line");
+      lua_pushcfunction(L, lua_vga_rect);          lua_setfield(L, -2, "rect");
+      lua_pushcfunction(L, lua_vga_box);           lua_setfield(L, -2, "box");
+      lua_pushcfunction(L, lua_vga_ellipse);       lua_setfield(L, -2, "ellipse");
+      lua_pushcfunction(L, lua_vga_filledellipse); lua_setfield(L, -2, "fillellipse");
+      lua_pushcfunction(L, lua_vga_text);          lua_setfield(L, -2, "text");
+      lua_pushcfunction(L, lua_vga_cls);           lua_setfield(L, -2, "cls");
+      lua_pushcfunction(L, lua_vga_pos);           lua_setfield(L, -2, "pos");
+      lua_pushcfunction(L, lua_vga_get_colors);    lua_setfield(L, -2, "gcolor");
+      lua_pushcfunction(L, lua_vga_wait_vsync);    lua_setfield(L, -2, "waitsync");
+      lua_pushcfunction(L, lua_vga_set_title);     lua_setfield(L, -2, "setTitle");
+      lua_pushcfunction(L, lua_vga_set_status);    lua_setfield(L, -2, "setStatus");
+      lua_pushcfunction(L, lua_vga_close_window);  lua_setfield(L, -2, "closeWindow");
+      lua_pushcfunction(L, lua_vga_open_window);   lua_setfield(L, -2, "openWindow");
+      lua_pushcfunction(L, lua_vga_update_window); lua_setfield(L, -2, "updateWindow");
+      lua_pushcfunction(L, lua_vga_cursor_onoff);  lua_setfield(L, -2, "cursor");
+      lua_pushcfunction(L, lua_vga_bmpload);       lua_setfield(L, -2, "bmpLoad");
+      lua_pushcfunction(L, lua_vga_bmpsave);       lua_setfield(L, -2, "bmpSave");
+      lua_setglobal(L, "vga");        // Die Tabelle "vga" registrieren
+      //-------------------------------- Lua sys-Funktionen -----------------------------
+      lua_newtable(L);
+      lua_pushcfunction(L, lua_sys_timer);         lua_setfield(L, -2, "timer");
+      lua_pushcfunction(L, lua_sys_load);          lua_setfield(L, -2, "load");
+      lua_pushcfunction(L, sys_get_time);          lua_setfield(L, -2, "gettime");
+      lua_pushcfunction(L, sys_get_date);          lua_setfield(L, -2, "getdate");
+      lua_setglobal(L, "sys");
+      //-------------------------------- Lua sd-Funktionen ------------------------------
+      // Eine neue Tabelle für die SD-Bibliothek in Lua erstellen
+      lua_newtable(L);
+      lua_pushcfunction(L, lua_sd_ls);     lua_setfield(L, -2, "ls");
+      lua_pushcfunction(L, lua_sd_remove); lua_setfield(L, -2, "remove");
+      lua_pushcfunction(L, lua_sd_mkdir);  lua_setfield(L, -2, "mkdir");
+      lua_pushcfunction(L, lua_sd_rmdir);  lua_setfield(L, -2, "rmdir");
+      lua_pushcfunction(L, lua_sd_cd);     lua_setfield(L, -2, "cd");
+      lua_pushcfunction(L, lua_sd_copy);   lua_setfield(L, -2, "copy");
+      lua_pushcfunction(L, lua_sd_rename); lua_setfield(L, -2, "rename");
+      lua_pushcfunction(L, lua_sd_exists); lua_setfield(L, -2, "exist");
+      lua_pushcfunction(L, lua_sd_write);  lua_setfield(L, -2, "write");
+      lua_pushcfunction(L, lua_sd_read_lines); lua_setfield(L, -2, "readline");
+      lua_pushcfunction(L, lua_sd_mount);   lua_setfield(L, -2, "mount");
+      lua_pushcfunction(L, lua_sd_unmount); lua_setfield(L, -2, "unmount");
+      lua_pushcfunction(L, lua_sd_cat);     lua_setfield(L, -2, "cat");
+      lua_pushcfunction(L, lua_sd_get_file_list); lua_setfield(L, -2, "listfile");
+      lua_pushcfunction(L, lua_sd_pwd);     lua_setfield(L, -2, "pwd");
+      lua_pushcfunction(L, lua_sd_open);    lua_setfield(L, -2, "open");
+      lua_pushcfunction(L, lua_sd_read);    lua_setfield(L, -2, "read");
+      lua_pushcfunction(L, lua_sd_seek);    lua_setfield(L, -2, "seek");
+      lua_pushcfunction(L, lua_sd_close);   lua_setfield(L, -2, "close");
+      lua_setglobal(L, "sd");         // Die Tabelle global unter dem Namen "sd" registrieren
+      //---------------------------------------------------------------------------------
+      // ========================================================================
+      // AUTOMATISCHER START: init.lua von SD-Karte laden und ausführen
+      // ========================================================================
+      if (SD.exists("/lua/init.lua")) {
+        File bootFile = SD.open("/lua/init.lua", FILE_READ);
+        if (bootFile) {
+          size_t fileSize = bootFile.size();
 
-          case 127:
-            if (inputBuffer.length() > 0) {
-              inputBuffer.remove(inputBuffer.length() - 1);
-              Terminal.write("\b\e[K");
+          char* bootBuffer = (char*)malloc(fileSize + 1);         // Dynamischen temporären Speicher im RAM1 für den Boot-Text anfordern
+          if (bootBuffer != NULL) {
+            bootFile.readBytes(bootBuffer, fileSize);
+            bootBuffer[fileSize] = '\0';
+            bootFile.close();
+
+            if (luaL_dostring(L, bootBuffer) != LUA_OK) {         // Übergabe des geladenen Text-Strings an den Lua-Kern
+              const char* error_msg = lua_tostring(L, -1);
+              Terminal.print("Fehler in init.lua: ");
+              Terminal.println(error_msg);
+              lua_pop(L, 1);
             }
-            break;
-
-          case KEY_ESC:
-            ln = false;
-            break;
-
-          case KEY_F1:
-            inputBuffer = "run(\"file.lua\")\n";
-            ln = false;
-            break;
-
-          case KEY_F2:
-            inputBuffer = String("edit(\"") + currentEditingFilename + "\")\n";
-            currentEditingFilename = '\0';
-            ln = false;
-            break;
-
-          case KEY_F3:
-            inputBuffer = String("run(\"") + currentEditingFilename + "\")\n";
-            currentEditingFilename = '\0';
-            ln = false;
-            break;
-
-          case KEY_F4:
-            inputBuffer = "info()\n";
-            ln = false;
-            break;
-
-
-          default:
-            inputBuffer += (char)c;
-            Terminal.write(c);
-            break;
+            free(bootBuffer);                                     // Speicher wieder freigeben
+          } else {
+            Terminal.println("Fehler: Zu wenig RAM fuer Boot-Puffer!\n\r");
+            bootFile.close();
+          }
+        } else {
+          Terminal.println("Fehler: Konnte init.lua nicht oeffnen!\n\r");
         }
       }
+      Terminal.print("> ");                                         //Eingabeprompt
+      Terminal.enableCursor(Cursor);
 
-      int status = luaL_dostring(L, inputBuffer.c_str());//line);
-      inputBuffer = "";
-      if (status != LUA_OK) {
-        const char* errorMsg = lua_tostring(L, -1);
-        Terminal.printf("Fehler: %s\n", errorMsg);
-        lua_pop(L, 1);
+      while (true) {
+        while (ln) {
+          c = inchar();
+          switch (c) {
+            case 13:
+              inputBuffer += '\0';
+              Terminal.println();
+              ln = false;
+              break;
+            case 127:
+              if (inputBuffer.length() > 0) {
+                inputBuffer.remove(inputBuffer.length() - 1);
+                Terminal.write("\b\e[K");
+              }
+              break;
+            case KEY_ESC:
+              ln = false;
+              break;
+            case KEY_F1:
+              inputBuffer = "run(\"file.lua\")\n";
+              ln = false;
+              break;
+            case KEY_F2:
+              inputBuffer = String("edit(\"") + currentEditingFilename + "\")\n";
+              currentEditingFilename = '\0';
+              ln = false;
+              break;
+            case KEY_F3:
+              inputBuffer = String("run(\"") + currentEditingFilename + "\")\n";
+              currentEditingFilename = '\0';
+              ln = false;
+              break;
+            case KEY_F4:
+              inputBuffer = "info()\n";
+              ln = false;
+              break;
+            default:
+              inputBuffer += (char)c;
+              Terminal.write(c);
+              break;
+          }
+        }
 
+        int status = luaL_dostring(L, inputBuffer.c_str());//line);
+        inputBuffer = "";
+        if (status != LUA_OK) {
+          const char* errorMsg = lua_tostring(L, -1);
+          Terminal.printf("Fehler: %s\n", errorMsg);
+          lua_pop(L, 1);
+        }
+        Terminal.println();
+        Terminal.print("> ");
+        ln = true;
       }
-      Terminal.println();
-      Terminal.print("> ");
-      ln = true;
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
-  }
-
-  //######################################################## SETUP #######################################################
-  void setup() {
-    Serial.begin(9600);                                                     // serielle Schnittstelle für DEBUG
-    delay(200);
-    pinMode(kSD_CS, OUTPUT);
-    digitalWrite(kSD_CS, HIGH);
-
-    SPI.begin();
-    Keyboard.begin(GPIO_NUM_33, GPIO_NUM_32);
-    PS2Controller.keyboard() -> setLayout(&fabgl::GermanLayout);                       //deutsche Tastatur
-    VGAController.begin();                                                             //VGA-Variante //64 oder 16 Farben
-    //VGAController.setFont(&fabgl::FONT_5x7);
-    VGAController.setResolution(QVGA_320x240_60Hz);                                    //Standard-Auflösung
-    Terminal.begin(&VGAController);
-    Terminal.activate(TerminalTransition::None); 
-    Terminal.connectLocally();                                                         // für Terminal Komandos
-    Terminal.loadFont(&fabgl::FONT_6x8);//6x8);
-
-    fbcolor(fColor, bColor);
-    tc.setCursorPos(1, 1);
-    Terminal.clear();
-    //GFX.clear();
-    Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.0 ---");
-    // 1. SPI und SD-Karte starten
-    spiSD.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
-
-    if (!SD.begin(kSD_CS, spiSD, speedHz)) {
-      Terminal.print("SD-Karten-Fehler");
-    } else {
-      // Wenn die SD-Karte da ist, Ordner prüfen/erstellen
-      if (!SD.exists("/lua")) {
-        SD.mkdir("/lua");
-      }
-
+      vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    // Prüfen, ob PSRAM auf dem ESP32 überhaupt aktiv/vorhanden ist
-    if (psramInit()) {
-      // 1. Editor-Puffer im PSRAM anlegen
-      textBuffer = (char*)ps_malloc(EDIT_BUFF_SIZE);
+    //######################################################## SETUP #######################################################
+    void setup() {
+      Serial.begin(9600);                                                     // serielle Schnittstelle für DEBUG
+      delay(200);
+      pinMode(kSD_CS, OUTPUT);
+      digitalWrite(kSD_CS, HIGH);
 
-      // 2. Clipboard-Puffer im PSRAM anlegen
-      clipboardBuffer = (char*)ps_malloc(CLIPBOARD_SIZE);
+      SPI.begin();
+      Keyboard.begin(GPIO_NUM_33, GPIO_NUM_32);
+      PS2Controller.keyboard() -> setLayout(&fabgl::GermanLayout);                       //deutsche Tastatur
+      VGAController.begin();                                                             //VGA-Variante //64 oder 16 Farben
+      //VGAController.setFont(&fabgl::FONT_5x7);
+      VGAController.setResolution(QVGA_320x240_60Hz);                                    //Standard-Auflösung
+      Terminal.begin(&VGAController);
+      Terminal.activate(TerminalTransition::None);
+      Terminal.connectLocally();                                                         // für Terminal Komandos
+      Terminal.loadFont(&fabgl::FONT_6x8);//6x8);
 
-      if (textBuffer != nullptr && clipboardBuffer != nullptr) {
-        memset(textBuffer, 0, EDIT_BUFF_SIZE);
-        memset(clipboardBuffer, 0, CLIPBOARD_SIZE);
+      fbcolor(fColor, bColor);
+      tc.setCursorPos(1, 1);
+      Terminal.clear();
+      //GFX.clear();
+      Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.0 ---");
+      // 1. SPI und SD-Karte starten
+      spiSD.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
 
-
+      if (!SD.begin(kSD_CS, spiSD, speedHz)) {
+        Terminal.print("SD-Karten-Fehler");
       } else {
-        Terminal.println("ERROR: Nicht genug PSRAM!");
+        // Wenn die SD-Karte da ist, Ordner prüfen/erstellen
+        if (!SD.exists("/lua")) {
+          SD.mkdir("/lua");
+        }
+
       }
-    } else {
-      Terminal.println("ERROR: Kein PSRAM gefunden!");
+
+      // Prüfen, ob PSRAM auf dem ESP32 überhaupt aktiv/vorhanden ist
+      if (psramInit()) {
+        // 1. Editor-Puffer im PSRAM anlegen
+        textBuffer = (char*)ps_malloc(EDIT_BUFF_SIZE);
+
+        // 2. Clipboard-Puffer im PSRAM anlegen
+        clipboardBuffer = (char*)ps_malloc(CLIPBOARD_SIZE);
+
+        if (textBuffer != nullptr && clipboardBuffer != nullptr) {
+          memset(textBuffer, 0, EDIT_BUFF_SIZE);
+          memset(clipboardBuffer, 0, CLIPBOARD_SIZE);
+
+
+        } else {
+          Terminal.println("ERROR: Nicht genug PSRAM!");
+        }
+      } else {
+        Terminal.println("ERROR: Kein PSRAM gefunden!");
+      }
+
+      Terminal.enableCursor(false);
+
+      //--------------- ESP32 RTC starten und stellen --------------------
+      char const *compileDate = __DATE__;
+      char const *compileTime = __TIME__;
+
+      // Monate konvertieren
+      char monthStr[4];
+      int day, year, hour, minute, second;
+      sscanf(compileDate, "%s %d %d", monthStr, &day, &year);
+      sscanf(compileTime, "%d:%d:%d", &hour, &minute, &second);
+
+      int month = 1;
+      const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+      for (int i = 0; i < 12; i++) {
+        if (strcmp(monthStr, months[i]) == 0) {
+          month = i + 1;
+          break;
+        }
+      }
+      e_rtc.setTime(second, minute, hour, day, month, year);
+
+      //------------------------------------------------------------------
+
+      // starte den Lua-Computer-Task auf Core 1
+      xTaskCreatePinnedToCore(
+        luaComputerTask,    // Funktion, die ausgeführt werden soll
+        "LuaTask",          // Name des Tasks
+        32768,              // Stack-Größe in Bytes (32 KB - absolut sicher für Lua)
+        NULL,               // Parameter, die übergeben werden
+        1,                  // Priorität des Tasks
+        &LuaTaskHandle,     // Task-Handle
+        1                   // Core (0 oder 1)
+      );
+      Terminal.print("> ");
     }
 
-    Terminal.enableCursor(false);
-
-    //--------------- ESP32 RTC starten und stellen --------------------
-    char const *compileDate = __DATE__;
-    char const *compileTime = __TIME__;
-
-    // Monate konvertieren
-    char monthStr[4];
-    int day, year, hour, minute, second;
-    sscanf(compileDate, "%s %d %d", monthStr, &day, &year);
-    sscanf(compileTime, "%d:%d:%d", &hour, &minute, &second);
-
-    int month = 1;
-    const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    for (int i = 0; i < 12; i++) {
-      if (strcmp(monthStr, months[i]) == 0) {
-        month = i + 1;
-        break;
-      }
+    //######################################################## LOOP ########################################################
+    void loop() {
+      delay(1000);
     }
-    e_rtc.setTime(second, minute, hour, day, month, year);
-
-    //------------------------------------------------------------------
-
-    // starte den Lua-Computer-Task auf Core 1
-    xTaskCreatePinnedToCore(
-      luaComputerTask,    // Funktion, die ausgeführt werden soll
-      "LuaTask",          // Name des Tasks
-      32768,              // Stack-Größe in Bytes (32 KB - absolut sicher für Lua)
-      NULL,               // Parameter, die übergeben werden
-      1,                  // Priorität des Tasks
-      &LuaTaskHandle,     // Task-Handle
-      1                   // Core (0 oder 1)
-    );
-    Terminal.print("> ");
-  }
-
-  //######################################################## LOOP ########################################################
-  void loop() {
-    delay(1000);
-  }

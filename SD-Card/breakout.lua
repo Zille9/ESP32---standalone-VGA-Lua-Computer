@@ -5,12 +5,12 @@
 
 -- --- CONFIGURATION ---
 local FeldX1 = 10
-local FeldX2 = 630
+local FeldX2 = 310
 local FeldY1 = 30
-local FeldY2 = 470
+local FeldY2 = 230
 local fcolor, bcolor = vga.gcolor()
 -- Schläger- und Ball-Maße
-local SchlaegerBreite = 80
+local SchlaegerBreite = 40
 local SchlaegerHoehe   = 10
 local BallGroesse      = 5
 local SchlaegerGeschw  = 24
@@ -18,17 +18,17 @@ local SchlaegerGeschw  = 24
 -- Steine-Raster (4 Zeilen x 10 Spalten)
 local STEIN_ZEILEN   = 5
 local STEIN_SPALTEN  = 10
-local STEIN_BREITE   = 56
-local STEIN_HOEHE    = 15
-local STEIN_ABSTAND_X = 6
-local STEIN_ABSTAND_Y = 6
-local STEIN_START_Y  = 60
+local STEIN_BREITE   = 25
+local STEIN_HOEHE    = 7
+local STEIN_ABSTAND_X = 2
+local STEIN_ABSTAND_Y = 2
+local STEIN_START_Y  = 30
 
 -- --- VARIABLEN ---
-local schlaegerX = 280
-local schlaegerY = 440
-local ballX      = 316
-local ballY      = 300
+local schlaegerX = 160
+local schlaegerY = 200
+local ballX      = 160
+local ballY      = 200
 
 -- Ball-Vektoren (Pixel-Schritte)
 local ballDX = 3
@@ -43,7 +43,7 @@ local altBallY      = ballY
 local punkte         = 0
 local leben          = 3
 local spielLaeuftNoch = true
-local geschwindigkeit = 16  -- Millisekunden pro Frame (~60 FPS)
+local geschwindigkeit = 25  -- Millisekunden pro Frame (~60 FPS)
 local letztesUpdate   = sys.timer()
 
 -- --- STEINE-ARRAY INITIALISIEREN ---
@@ -126,9 +126,9 @@ while spielLaeuftNoch do
     -- 1. ECHTZEIT-TASTENABFRAGE (Pfeiltasten Links=21; Rechts=6; ESC=27)
     local taste = inkey()
     if taste then
-        if taste == 27 then
-            spielLaeuftNoch = false
-        elseif taste == 216 then -- PFEIL LINKS
+        --if taste == 27 then
+        --    spielLaeuftNoch = false
+        if taste == 216 then -- PFEIL LINKS
             schlaegerX = schlaegerX - SchlaegerGeschw
             if schlaegerX < FeldX1 + 8 then schlaegerX = FeldX1 + 8 end
         elseif taste == 215 then -- PFEIL RECHTS
@@ -212,11 +212,14 @@ while spielLaeuftNoch do
             updateStatusText()
             
             if leben <= 0 then
-                vga.text(25, 25, "GAME OVER! DRUECKE ESC", 196, bcolor,true)
-                -- Warten auf ESC
-                while inkey() ~= 27 do delay(20) end
-                spielLaeuftNoch = false
-            else
+                vga.text(15, 15, "GAME OVER! DRUECKE ESC", 196, bcolor,true)
+                   -- Warten auf ESC
+                   --local taste = waitkey()
+                   if taste == 27 then
+                      spielLaeuftNoch = false
+                    
+                      
+                   end
                 ballZuruecksetzen()
             end
         end
@@ -253,6 +256,6 @@ while spielLaeuftNoch do
     --delay(2) -- System-Schonung
 end
 
--- Nach dem Beenden Schirm putzen fürs Terminal
-collectgarbage("collect")
+-- Nach dem Beenden Bildschirm loeschen
+collectgarbage()
 vga.cls()

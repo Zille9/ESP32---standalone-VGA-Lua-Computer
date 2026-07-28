@@ -1,5 +1,5 @@
 -- ===================================================
--- INTERAKTIVER JULIA-ZOOMER (640x480) FÜR TEENSY 4.1
+-- INTERAKTIVER JULIA-ZOOMER (320x240) FUER ESP32
 -- ===================================================
 
 -- Initialisierung der Zoom- und Positions-Variablen
@@ -7,11 +7,11 @@ local centerX = -0.7
 local centerY = 0.27015
 local zoom    = 1.0
 
-local screenWidth  = 320 --640
-local screenHeight = 240 --480
-local maxIterations = 128 -- Niedriger für flüssiges interaktives Rendern
+local screenWidth  = 320 
+local screenHeight = 240 
+local maxIterations = 128 -- Niedriger fuer fluessiges Rendern
 
--- Feste Parameter für diese Julia-Insel
+-- Feste Parameter fuer die Julia-Insel
 local c_re = -0.7
 local c_im = 0.27015
 
@@ -19,7 +19,6 @@ local c_im = 0.27015
 local function renderFractal()
     vga.cls()
     vga.pos(0, 0)
-    --vga.print("Zoom: " .. math.floor(zoom) .. "x | Pfeile: Bewegen | +/-: Zoom | ESC: Exit\n\r")
 
     -- Berechne die aktuellen Grenzen basierend auf Center und Zoom
     local widthX = 3.0 / zoom
@@ -32,6 +31,7 @@ local function renderFractal()
 
     local factorX = (maxX - minX) / screenWidth
     local factorY = (maxY - minY) / screenHeight
+
 
     for y = 0, screenHeight - 1 do
         local start_im = maxY - (y * factorY)
@@ -56,7 +56,7 @@ local function renderFractal()
             end
             
             if iteration < maxIterations then
-                local colorIdx = (iteration * 8) % 256
+                local colorIdx = (iteration * 4) % 64
                 if colorIdx == 0 then colorIdx = 1 end
                 vga.pset(x, y, colorIdx)
             else

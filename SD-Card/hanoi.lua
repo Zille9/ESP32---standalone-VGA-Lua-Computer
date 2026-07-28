@@ -12,14 +12,16 @@ local FARBE_BLAU    = 3
 local FARBE_GELB    = 60
 local FARBE_MAGENTA = 51
 
+local fc,bc = vga.gcolor()
+
 local scheibenFarben = { FARBE_ROT, FARBE_GELB, FARBE_BLAU, FARBE_GRUEN, FARBE_MAGENTA, FARBE_WEISS }
 
--- 2. Spiel-Konfiguration für 320x240
+-- 2. Spiel-Konfiguration fuer 320x240
 local anzahlScheiben = 5 
 local turmX = { 60, 160, 260 }   -- Perfekt aufgeteilt auf 320 Pixel Breite
 local basisY = 180               -- Bodenplatte im unteren Drittel
-local stabHoehe = 80             -- Höhe der Türme
-local scheibenHoehe = 10         -- Etwas flacher für 240er Höhe
+local stabHoehe = 80             -- Hoehe der Tuerme
+local scheibenHoehe = 10         -- Etwas flacher fuer 240er Hoehe
 local maxScheibenBreite = 54     -- Maximale Breite der untersten Scheibe
 
 local tuerme = { {}, {}, {} }
@@ -47,7 +49,7 @@ end
 
 local function zeichneSpielfeld()
     vga.cls()
-    vga.color(FARBE_WEISS, FARBE_SCHWARZ)
+    vga.color(FARBE_WEISS, bc)
     vga.waitsync()
     -- Titel anzeigen (Mittig im 53-Spalten-Raster)
     textPos(80, 10)
@@ -85,18 +87,18 @@ local function zeichneSpielfeld()
     if auswahlTurm then
         local ax = turmX[auswahlTurm]
         textPos(ax , basisY - stabHoehe - 12)
-        vga.color(FARBE_ROT, FARBE_SCHWARZ)
+        vga.color(FARBE_ROT, bc)
         print("[X]")
         statusText = "Ziel-Turm waehlen (1-3)"
     end
     
     -- Status und Info-Texte im unteren Displaybereich (Zeile 25 und 27)
     textPos(126, 25)
-    vga.color(FARBE_GELB, FARBE_SCHWARZ)
+    vga.color(FARBE_GELB, bc)
     print("Zuege: " .. zuege)
     vga.waitsync()
     textPos(20, 222)
-    vga.color(FARBE_WEISS, FARBE_SCHWARZ)
+    vga.color(FARBE_WEISS, bc)
     print(statusText)
     vga.waitsync()
 end
@@ -133,15 +135,15 @@ local function pruefeSieg()
         
         -- Sieges-Popup kompakt in die Mitte setzen
         textPos(100, 40)
-        vga.color(FARBE_GRUEN, FARBE_SCHWARZ)
+        vga.color(FARBE_GRUEN, bc)
         print("!!! GEWONNEN !!!")
         
         textPos(100, 60)
-        vga.color(FARBE_WEISS, FARBE_SCHWARZ)
+        vga.color(FARBE_WEISS, bc)
         print("Sieg in " .. zuege .. " Zuegen!")
         
         textPos(100, 75)
-        vga.color(FARBE_GELB, FARBE_SCHWARZ)
+        vga.color(FARBE_GELB, bc)
         if zuege < 34 then 
             print("Sie sind ein Profi!") 
         elseif zuege >= 34 and zuege < 38 then 
@@ -150,22 +152,21 @@ local function pruefeSieg()
             print("Sie muessen noch ueben")
         end 
         vga.waitsync()
-        vga.color(FARBE_WEISS, FARBE_SCHWARZ)
+        vga.color(FARBE_WEISS, bc)
         textPos(100, 90)
         print("ENTER fuer neues Spiel")
         
-        while true do
-            local t = inkey()
-            if t == 13 or t == "enter" then
-                spielInitialisieren()
-                break
-            elseif t == 27 or t == "q" or t == "Q" then
-                return false
-            end
-            delay(10)
+        local t = waitkey() --inkey()
+        if t == 13 or t == "enter" then
+           spielInitialisieren()
+           zeichneSpielfeld()
+           return true
+
+        elseif t == 27 or t == "q" or t == "Q" then
+           return false
         end
     end
-    return true
+   return true
 end
 
 -- ============================================================================
@@ -177,7 +178,7 @@ zeichneSpielfeld()
 local spielLaeuftNoch = true
 
 while spielLaeuftNoch do
-    local taste = inkey()
+    local taste = waitkey() --inkey()
     
     if taste then
         if taste == 27 or taste == "q" or taste == "Q" then

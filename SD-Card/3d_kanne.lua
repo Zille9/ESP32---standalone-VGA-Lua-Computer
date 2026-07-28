@@ -228,7 +228,7 @@ function Kanne3D.run()
         -- end
     end
 
-    collectgarbage("collect") 
+    --collectgarbage("collect") 
     vga.cls()
     print("> ")
 end

@@ -10,20 +10,20 @@ vga.cls()
 
 vga.pos(0, 0)
 
--- Auflösung der VGA-Karte auf 640x480 festlegen
+-- Aufloesung der VGA-Karte auf 320x240 festlegen
 local screenWidth  = 320 
 local screenHeight = 240 
 
--- Sichtfenster für den Bildausschnitt koordinieren
+-- Sichtfenster fuer den Bildausschnitt koordinieren
 local minX = -1.5
 local maxX =  1.5
 local minY = -1.0
 local maxY =  1.0
 
--- Maximale Rechentiefe für feine Strukturen
+-- Maximale Rechentiefe fuer feine Strukturen
 local maxIterations = 128
 
--- Vorberechnete Faktoren für maximale Pixel-Geschwindigkeit
+-- Vorberechnete Faktoren fuer maximale Pixel-Geschwindigkeit
 local factorX = (maxX - minX) / screenWidth
 local factorY = (maxY - minY) / screenHeight
 
@@ -36,14 +36,14 @@ local factorY = (maxY - minY) / screenHeight
 local c_re = -0.7
 local c_im = 0.27015
 
--- Hauptschleife über alle 480 Zeilen
+-- Hauptschleife ueber alle 240 Zeilen
 for y = 0, screenHeight - 1 do
-    -- Imaginärteil (Startwert Z_im) für diese Zeile
+    -- Imaginaerteil (Startwert Z_im) fuer diese Zeile
     local start_im = maxY - (y * factorY)
     
-    -- Schleife über alle 640 Spalten
+    -- Schleife ueber alle 320 Spalten
     for x = 0, screenWidth - 1 do
-        -- Realteil (Startwert Z_re) für dieses Pixel
+        -- Realteil (Startwert Z_re) fuer dieses Pixel
         local z_re = minX + (x * factorX)
         local z_im = start_im
         
@@ -63,24 +63,22 @@ for y = 0, screenHeight - 1 do
             iteration = iteration + 1
         end
         
-        -- Pixel einfärben
+        -- Pixelfarbe
         if iteration < maxIterations then
-            -- Fließendes Farb-Mapping für Ihre 256 Farben
-            local colorIdx = (iteration * 4) % 256
+            -- Farb-Mapping fuer 64 Farben
+            local colorIdx = (iteration * 4) % 64
             
-            -- Hintergrundfarbe (0) für das Fraktal ausschließen
+            -- Hintergrundfarbe (0) fuer das Fraktal ausschliessen
             if colorIdx == 0 then colorIdx = 1 end
             
             vga.pset(x, y, colorIdx)
         else
-            -- Der "See" im Inneren der Julia-Insel bleibt tiefschwarz
+            -- Der "See" im Inneren der Julia-Insel bleibt schwarz
             vga.pset(x, y, 0)
         end
     end
     
-    -- WICHTIG: Jede Zeile dem Teensy-Kern kurz Zeit geben,
-    -- die Hintergrundaufgaben (USB-Tastatur, PC-Schnittstelle) zu verarbeiten!
-    vga.waitsync() --delay(1)
+    vga.waitsync() 
 end
 
 --- Farben wieder herstellen ---

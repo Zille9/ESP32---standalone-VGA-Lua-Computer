@@ -174,7 +174,7 @@ elseif naechsteAktion == "START_DATEI" then
     if chunk then chunk() end
 
 elseif naechsteAktion == "TERMINAL" then
-    collectgarbage("collect")
+    --collectgarbage("collect")
 
     vga.cls()
     vga.cursor(true)
