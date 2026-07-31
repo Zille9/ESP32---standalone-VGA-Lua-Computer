@@ -23,6 +23,13 @@
 //                                                                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // ################################################### Projekt-Tagebuch ############################################################################
+// 21.07.2026
+// Olimex-SBC-Board angekommen, die GPIO-Funktionen waren schwer zu knacken - durch den SPI-Port der gleichzeitig von der SD-Karte benutzt wird
+// gestaltete sich die Umsetzung etwas hakelig aber jetzt funktioniert das Pin-Sharing
+// erster Erfolg ist das Auslesen der 8 Pins am UEXT-Port - war ein hartes Stück Arbeit
+// als nächstes muss ich ein LED-Band zum Darstellen der Pin-Write-Funktionen erstellen
+// danach sind UART,I2C und SPI dran - hier ist die Konfiguration einfacher, weil die Pins vorgegeben sind
+//
 // 27.07.2026
 // sd.open, close, read, write, readline und seek hinzugefügt
 // die Funktionen Suche und Weitersuchen im Editor eingebaut
@@ -58,6 +65,7 @@ fabgl::VGAController    VGAController;
 fabgl::Canvas           GFX(&VGAController);
 TerminalController      tc(&Terminal);
 fabgl::SoundGenerator SoundGenerator;
+
 
 //**************************** EDITOR - Varablen **********************************************
 #define EDIT_BUFF_SIZE 131072     // 128 KB (Oder 262144 für 256 KB – ganz nach Wunsch!)
@@ -163,12 +171,22 @@ SPIClass spiSD(HSPI);
 #define MAX_OPEN_FILES 4
 static File openFiles[MAX_OPEN_FILES];
 
+//---------------- Board-Auswahl ---------------------
+
+// ------ Board_Type OLIMEX_SBC ----------------------
+#include "CH32V003.h"
+CH32V003 Expander;
+
+#define kSD_MISO 35
+// ------ Board_Type TTGO ---------------------------- 
+// Board_Type TTGO
+//  #define kSD_MISO 2
 #define kSD_CS   13
-#define kSD_MISO 2 //16
 #define kSD_MOSI 12
 #define kSD_CLK  14
-const char* currentEditingFilename = '\0';
-uint32_t speedHz = 16000000;
+//----------------------------------------------------
+const char* currentEditingFilename = nullptr;
+uint32_t speedHz = 4000000;
 //------------------------------------- OTA-Update-Lib --------------------------------------------------------------------------------------------
 #include <Update.h>
 //-------------------------------------------------------------------------------------------------------------------------------------------------
@@ -226,9 +244,9 @@ extern "C" {
     int _kill(int pid, int sig) {
       return -1;
     }
-    int system(const char *command) {
-      return -1;
-    }
+    // int system(const char *command) {
+    //   return -1;
+    // }
   }
 
 
@@ -480,7 +498,7 @@ extern "C" {
     memset(textBuffer, 0, EDIT_BUFF_SIZE);
 
     if (SD.exists(sdPath.c_str())) {
-      Terminal.printf("Lade %s von SD-Karte...\n\r", filename);
+      //Terminal.printf("Lade %s von SD-Karte...\n\r", filename);
       File sdFile = SD.open(sdPath.c_str(), FILE_READ);
 
       if (sdFile) {
@@ -1340,7 +1358,7 @@ extern "C" {
     tc.setCursorPos(1, 1);
     Terminal.write("\x1b[K");                                              //komplette Zeile mit cyan Hintergrund
     GFX.drawText(&fabgl::FONT_5x8, 2, 0, "F1=Menu F2=Copy F3=Paste F4=Suche | ");
-    GFX.drawText(&fabgl::FONT_5x8, 41*5, 0, currentEditingFilename);
+    GFX.drawText(&fabgl::FONT_5x8, 41 * 5, 0, currentEditingFilename);
     GFX.waitCompletion(false);
     fbcolor(63, 1);
     tc.setCursorPos(1, 2);
@@ -1448,7 +1466,7 @@ extern "C" {
           Terminal.printf("Erstelle neue Datei: %s\n\r", filename);
           vTaskDelay(pdMS_TO_TICKS(500));
         }
-        currentEditingFilename = '\0';                                            // alten Dateinamen löschen
+        currentEditingFilename = nullptr;                                             // alten Dateinamen löschen
         currentEditingFilename = filename;                                        // Dateiname merken für Titelzeile
 
         speichern = runFullscreenEditor(filename, fehlerZeile);
@@ -1719,6 +1737,7 @@ extern "C" {
             }
             vTaskDelay(pdMS_TO_TICKS(10));
           }
+
           fbcolor(63, 1);
           redrawScreen();
         }
@@ -1726,13 +1745,14 @@ extern "C" {
         // WENN kein alter Begriff da ist (oder 'N' gedrückt wurde): Neue Eingabe starten
         if (letzterSuchBegriff.length() == 0 && c != KEY_ESC) {
           int sX = 1, sY = 2, sW = 52, sH = 3;
-
+          Terminal.enableCursor(false);
           fbcolor(48, 57);                                                  //roter Rahmen, orange Hintergrund
           GFX.fillRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
           GFX.drawRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
           fbcolor(0, 57);                                                   //schwarzer Text auf orange Hintergrund
           tc.setCursorPos(sX + 2, sY + 2);
           Terminal.print("Suchen: ");
+          Terminal.enableCursor(true);
 
           bool eingabeAktiv = true;
           while (eingabeAktiv) {
@@ -1801,7 +1821,7 @@ extern "C" {
         }
         Terminal.enableCursor(true);
       }
-      
+
       // ============================== PFEIL NACH OBEN ('A') ===========================================
       if (c == KEY_UP) {
         if (cursorPos > 0) {
@@ -3020,59 +3040,14 @@ return 1;
       }
     }
 
-void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
-  (void)ud;
-
-  // Fall 1: Speicher soll komplett freigegeben werden (nsize == 0)
-  if (nsize == 0) {
-    if (ptr != nullptr) {
-      free(ptr);
-      // Wenn ptr gültig war, war die echte alte Größe 'osize'
-      if (luaCurrentMemoryUsage >= osize) {
-        luaCurrentMemoryUsage -= osize;
-      } else {
-        luaCurrentMemoryUsage = 0;
-      }
-    }
-    return nullptr;
-  }
-
-  // Fall 2: Speicher wird neu angefordert oder verändert
-  else {
-    size_t tatsaechliche_alte_groesse = (ptr == nullptr) ? 0 : osize;
-
-    long long differenz = (long long)nsize - (long long)tatsaechliche_alte_groesse;
-
-    // Wenn der Speicher wächst, prüfen wir das konfigurierte Limit
-    if (differenz > 0) {
-      if ((luaCurrentMemoryUsage + differenz) > LUA_MAX_PSRAM) {
-        Terminal.println("[LUA] Speicherlimit im PSRAM erreicht!");
-        return nullptr;
-      }
-    }
-
-    // Die eigentliche Allokation/Größenänderung im PSRAM durchführen
-    void* new_ptr = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM);
-
-    // Zähler NUR aktualisieren, wenn der ESP32 den Speicher auch wirklich erhalten hat
-    if (new_ptr != nullptr) {
-      luaCurrentMemoryUsage += differenz;
-    } else {
-      Terminal.println("[LUA] ESP32 PSRAM-Allokationsfehler (Fragmentierung?)");
-    }
-
-    return new_ptr;
-  }
-}
-/*
     void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
       (void)ud;
 
-      // Fall 1: Speicher soll komplett freigegeben werden
+      // Fall 1: Speicher soll komplett freigegeben werden (nsize == 0)
       if (nsize == 0) {
         if (ptr != nullptr) {
           free(ptr);
-          // Wir ziehen die alte Größe vom Lua-Verbrauch ab
+          // Wenn ptr gültig war, war die echte alte Größe 'osize'
           if (luaCurrentMemoryUsage >= osize) {
             luaCurrentMemoryUsage -= osize;
           } else {
@@ -3082,11 +3057,13 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
         return nullptr;
       }
 
-      // Fall 2: Speicher wird neu angefordert oder verändert (realloc)
+      // Fall 2: Speicher wird neu angefordert oder verändert
       else {
-        long long differenz = (long long)nsize - (long long)osize;
+        size_t tatsaechliche_alte_groesse = (ptr == nullptr) ? 0 : osize;
 
-        // Wenn es eine Vergrößerung ist, prüfen wir das Limit
+        long long differenz = (long long)nsize - (long long)tatsaechliche_alte_groesse;
+
+        // Wenn der Speicher wächst, prüfen wir das konfigurierte Limit
         if (differenz > 0) {
           if ((luaCurrentMemoryUsage + differenz) > LUA_MAX_PSRAM) {
             Terminal.println("[LUA] Speicherlimit im PSRAM erreicht!");
@@ -3094,21 +3071,336 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
           }
         }
 
-        // Die eigentliche Allokation im PSRAM ausführen
+        // Die eigentliche Allokation/Größenänderung im PSRAM durchführen
         void* new_ptr = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM);
-        // Nur wenn die Allokation erfolgreich war, Zähler aktualisieren
+
+        // Zähler NUR aktualisieren, wenn der ESP32 den Speicher auch wirklich erhalten hat
         if (new_ptr != nullptr) {
           luaCurrentMemoryUsage += differenz;
+        } else {
+          Terminal.println("[LUA] ESP32 PSRAM-Allokationsfehler (Fragmentierung?)");
         }
+
         return new_ptr;
       }
     }
-    */
+    //############################################ GPIO Funktionen ####################################################
+int lua_gpioTest(lua_State* L) {
+    // 1. PHASE: Pin 9 (PORTD, Pin 4) exakt wie im C++ Example als Eingang konfigurieren
+    Expander.configureUEXT (GPIO_Pin_6, DIRECTION_IN,1);    // Pull up/down: GPIO4 pulled down (0)
+  
 
+    // Eine kleine Hardware-Atempause für den geteilten SPI-Bus und den Inverter
+    vTaskDelay(pdMS_TO_TICKS(10));
+    yield();
+
+    // 2. PHASE: Den Wert direkt als Ganzzahl (int) auslesen (0, 8, 16 etc.)
+    int raw_value = Expander.readUEXT (GPIO_6);
+
+    // 3. PHASE: Für uns im Seriellen Monitor der Arduino-IDE protokollieren
+    Serial.printf("[C++ GPIO-Test] Roher Register-Wert von PD4: %d\n", raw_value);
+    Serial.flush();
+
+    // Normierung: Jede Zahl größer als 0 wird für Lua zu einer sauberen 1, 0 bleibt 0
+    int final_level = raw_value;//(raw_value > 0) ? 1 : 0;
+
+    // Wert zurück an Lua geben
+    lua_pushinteger(L, final_level);
+    return 1;
+}
+    
+    
+    
+    //---------------------------------- gpio.config("mode",parameters) ------------------------------------
+
+    int lua_gpioConfig(lua_State* L) {
+      // Wenn der 1. Parameter eine Tabelle ist (z.B. gpio.UEXT_9), ist es ein UEXT-Direktaufruf!
+      if (lua_isnumber(L, 1)) {
+        int uext_pin = luaL_checkinteger(L, 1);
+        int lua_dir  = luaL_checkinteger(L, 2); // 1 = IN, 0 = OUT
+        int lua_pull = luaL_optinteger(L, 3, 0); // 1 = PULL_UP/DOWN, 0 = NONE
+
+        uint8_t port = 0;
+        uint8_t pin_mask = 0;
+
+        // Port und die exakte GPIO_Pin_X Maske laut deiner Liste zuordnen
+        if (uext_pin == 3)  {
+          port = GPIO_PORTD;
+          pin_mask = GPIO_Pin_5;
+        }
+        if (uext_pin == 4)  {
+          port = GPIO_PORTD;
+          pin_mask = GPIO_Pin_6;
+        }
+        if (uext_pin == 5)  {
+          port = GPIO_PORTC;
+          pin_mask = GPIO_Pin_2;
+        }
+        if (uext_pin == 6)  {
+          port = GPIO_PORTC;
+          pin_mask = GPIO_Pin_1;
+        }
+        if (uext_pin == 7)  {
+          port = GPIO_PORTA;
+          pin_mask = GPIO_Pin_2;
+        }
+        if (uext_pin == 8)  {
+          port = GPIO_PORTA;
+          pin_mask = GPIO_Pin_1;
+        }
+        if (uext_pin == 9)  {
+          port = GPIO_PORTD;  // PD4
+          pin_mask = GPIO_Pin_4;
+        }
+        if (uext_pin == 10) {
+          port = GPIO_PORTD;  // PD3
+          pin_mask = GPIO_Pin_3;
+        }
+
+        // Masken exakt nach deinem funktionierenden Example aufbauen:
+        uint8_t mask_pins = pin_mask;
+        uint8_t mask_dirs = (lua_dir == 1) ? pin_mask : 0; // Wenn IN (1), dann Maske setzen
+        uint8_t mask_pull = (lua_pull == 1) ? pin_mask : 0; // Wenn Pull aktiv, Maske setzen
+
+        // Der originale, funktionierende Bibliotheks-Aufruf
+        Expander.configurePort(port, mask_pins, mask_dirs, mask_pull);
+        
+        vTaskDelay(pdMS_TO_TICKS(5)); // SPI-Beruhigungspause
+        return 0;
+      }
+      // Altes Subsystem-Auswertung (für "UART", "I2C", "SPI") falls der 1. Parameter ein String ist
+      const char* mode = luaL_checkstring(L, 1);
+      if (strcmp(mode, "UART") == 0) {
+        Expander.configureUART(luaL_checkinteger(L, 2), UART_StopBits_1, UART_Parity_No);
+      } else if (strcmp(mode, "I2C") == 0) {
+        Expander.configureI2C(luaL_checkinteger(L, 2));
+      } else if (strcmp(mode, "SPI") == 0) {
+        Expander.configureSPI(luaL_checkinteger(L, 2), luaL_checkinteger(L, 3));
+      }
+      return 0;
+    }
+    //---------------------------------- gpio.write("mode",parameters) ------------------------------------
+    int lua_gpioWrite(lua_State* L) {
+      // FALL A: Direktes Pin-Objekt (Tabelle wie gpio.UEXT_10) wurde übergeben
+      if (lua_isnumber(L, 1)) {
+        int uext_pin = luaL_checkinteger(L, 1);
+        uint8_t val  = (uint8_t)luaL_checkinteger(L, 2);
+
+        if (uext_pin == 3)  {
+          Expander.setGPIO(GPIO_PORTD, GPIO_5, val);
+        }
+        if (uext_pin == 4)  {
+          Expander.setGPIO(GPIO_PORTD, GPIO_6, val);
+        }
+        if (uext_pin == 5)  {
+          Expander.setGPIO(GPIO_PORTC, GPIO_2, val);
+        }
+        if (uext_pin == 6)  {
+          Expander.setGPIO(GPIO_PORTC, GPIO_1, val);
+        }
+        if (uext_pin == 7)  {
+          Expander.setGPIO(GPIO_PORTA, GPIO_2, val);
+        }
+        if (uext_pin == 8)  {
+          Expander.setGPIO(GPIO_PORTA, GPIO_1, val);
+        }
+        if (uext_pin == 9)  {
+          Expander.setGPIO(GPIO_PORTD, GPIO_4, val);
+        }
+        if (uext_pin == 10) {
+          Expander.setGPIO(GPIO_PORTD, GPIO_3, val);
+        }
+        return 0;
+      }
+
+
+      // FALL B: Ein Text-Ziel (Busse) wurde übergeben
+      const char* target = luaL_checkstring(L, 1);
+
+      // ==========================================
+      //  SUB-SYSTEM: UART
+      // ==========================================
+      if (strcmp(target, "UART") == 0) {
+        if (lua_isstring(L, 2)) {
+          Expander.strWriteUART((char*)lua_tostring(L, 2));
+        } else if (lua_istable(L, 2)) {
+          size_t size = lua_rawlen(L, 2);
+          if (size > 0) {
+            uint8_t* buffer = new uint8_t[size];
+            for (size_t i = 1; i <= size; i++) {
+              lua_rawgeti(L, 2, i);
+              buffer[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
+              lua_pop(L, 1);
+            }
+            Expander.writeUART(buffer, size);
+            delete[] buffer;
+          }
+        }
+        return 0;
+      }
+      // ==========================================
+      //  SUB-SYSTEM: I2C
+      // ==========================================
+      else if (strcmp(target, "I2C") == 0) {
+        uint8_t address = luaL_checkinteger(L, 2);
+        if (lua_isnumber(L, 3) && lua_isnumber(L, 4)) {
+          Expander.writeRegI2C(address, luaL_checkinteger(L, 3), luaL_checkinteger(L, 4));
+        } else if (lua_istable(L, 3)) {
+          size_t size = lua_rawlen(L, 3);
+          if (size > 0) {
+            uint8_t* buffer = new uint8_t[size];
+            for (size_t i = 1; i <= size; i++) {
+              lua_rawgeti(L, 3, i);
+              buffer[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
+              lua_pop(L, 1);
+            }
+            Expander.writeI2C(address, buffer, size);
+            delete[] buffer;
+          }
+        }
+        return 0;
+      }
+      // ==========================================
+      //  SUB-SYSTEM: SPI (Kombiniert Senden/Lesen)
+      // ==========================================
+      else if (strcmp(target, "SPI") == 0) {
+        luaL_checktype(L, 2, LUA_TTABLE);
+        int bitSize = luaL_optinteger(L, 3, 8); // Standard: 8-Bit
+        size_t size = lua_rawlen(L, 2);
+
+        if (size == 0) {
+          lua_newtable(L);
+          return 1;
+        }
+
+        lua_newtable(L); // Rückgabetabelle für Lua vorbereiten
+
+        if (bitSize == 16) {
+          uint16_t* tx = new uint16_t[size];
+          uint16_t* rx = new uint16_t[size];
+          for (size_t i = 1; i <= size; i++) {
+            lua_rawgeti(L, 2, i);
+            tx[i - 1] = (uint16_t)luaL_checkinteger(L, -1);
+            lua_pop(L, 1);
+          }
+          Expander.transferSPI16(tx, rx, (uint8_t)size);
+          for (size_t i = 1; i <= size; i++) {
+            lua_pushinteger(L, rx[i - 1]);
+            lua_rawseti(L, -2, i);
+          }
+          delete[] tx; delete[] rx;
+        } else {
+          uint8_t* tx = new uint8_t[size];
+          uint8_t* rx = new uint8_t[size];
+          for (size_t i = 1; i <= size; i++) {
+            lua_rawgeti(L, 2, i);
+            tx[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
+            lua_pop(L, 1);
+          }
+          Expander.transferSPI8(tx, rx, (uint8_t)size);
+          for (size_t i = 1; i <= size; i++) {
+            lua_pushinteger(L, rx[i - 1]);
+            lua_rawseti(L, -2, i);
+          }
+          delete[] tx; delete[] rx;
+        }
+        return 1; // Gibt empfangene SPI-Daten als Tabelle zurück
+      }
+      else {
+        return luaL_error(L, "Unbekanntes Schreibziel: %s", target);
+      }
+      return 0;
+    }
+
+
+
+    //---------------------------------- gpio.read("mode",parameters) ------------------------------------
+
+
+
+
+
+    int lua_gpioRead(lua_State* L) {
+      // FALL A: Direktes Pin-Objekt (Tabelle wie gpio.UEXT_9) wurde übergeben
+      if (lua_isnumber(L, 1)) {
+        int uext_pin = luaL_checkinteger(L, 1);
+
+        // 1. WICHTIG: Datentyp von 'bool' auf 'int' oder 'uint8_t' ändern!
+        int raw_value = 0;
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+
+        // 2. Nutze hier wieder deine auskommentierte Pin-Liste (jetzt mit raw_value)
+        if (uext_pin == 3)  {
+          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_5);
+        }
+        if (uext_pin == 4)  {
+          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_6);
+        }
+        if (uext_pin == 5)  {
+          raw_value = Expander.getPort(GPIO_PORTC, GPIO_Pin_2);
+        }
+        if (uext_pin == 6)  {
+          raw_value = Expander.getPort(GPIO_PORTC, GPIO_Pin_1);
+        }
+        if (uext_pin == 7)  {
+          raw_value = Expander.getPort(GPIO_PORTA, GPIO_Pin_2);
+        }
+        if (uext_pin == 8)  {
+          raw_value = Expander.getPort(GPIO_PORTA, GPIO_Pin_1);
+        }
+        if (uext_pin == 9)  {
+          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_4);  // PD4 -> Liefert 16
+        }
+        if (uext_pin == 10) {
+          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_3);  // PD3 -> Liefert 8
+        }
+        
+        // 3. Normierung: !! verwandelt 16 oder 8 in eine 1. 0 bleibt 0.
+        int final_level = !!raw_value;
+
+        // 4. Den sauberen, normierten Wert (0 oder 1) an Lua übergeben
+        lua_pushinteger(L, final_level);
+        return 1;
+      }
+
+      // FALL B: Ein Text-Ziel (Busse) wurde übergeben
+      const char* target = luaL_checkstring(L, 1);
+      if (strcmp(target, "I2C") == 0) {
+        uint8_t address = luaL_checkinteger(L, 2);
+        if (lua_gettop(L) >= 3) {
+          uint8_t val = Expander.readRegI2C(address, luaL_checkinteger(L, 3));
+          lua_pushinteger(L, val);
+          return 1;
+        }
+      }
+      else if (strcmp(target, "UART") == 0) {
+        uint8_t size = luaL_checkinteger(L, 2);
+        if (size == 0) {
+          lua_newtable(L);
+          return 1;
+        }
+        uint8_t* buffer = new uint8_t[size];
+        uint8_t bytesRead = Expander.readUART(buffer, size);
+        lua_newtable(L);
+        for (size_t i = 1; i <= bytesRead; i++) {
+          lua_pushinteger(L, buffer[i - 1]);
+          lua_rawseti(L, -2, i);
+        }
+        delete[] buffer;
+        return 1;
+      }
+      return 0;
+    }
+
+
+    //############################################ LUA-Task - Hauptschleife #################################################
     void luaComputerTask(void * parameter) {
       bool ln = true;
       int c;
       //L = luaL_newstate();
+      
+      
       lua_State *L = lua_newstate(lua_psram_allocator, nullptr, 0);
       if (L == nullptr) {
         Terminal.println("CRITICAL ERROR: Lua konnte nicht im PSRAM gestartet werden!");
@@ -3191,6 +3483,23 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
       lua_pushcfunction(L, lua_sd_close);   lua_setfield(L, -2, "close");
       lua_setglobal(L, "sd");         // Die Tabelle global unter dem Namen "sd" registrieren
       //---------------------------------------------------------------------------------
+
+      //-------------------------------- Lua gpio-Funktionen ----------------------------
+      lua_newtable(L);
+      int tableIndex = lua_gettop(L);
+
+      lua_pushcfunction(L, lua_gpioConfig);     lua_setfield(L, tableIndex, "config");
+      lua_pushcfunction(L, lua_gpioWrite);      lua_setfield(L, tableIndex, "write");
+      lua_pushcfunction(L, lua_gpioRead);       lua_setfield(L, tableIndex, "read");
+      lua_pushcfunction(L, lua_gpioTest);       lua_setfield(L, tableIndex, "test");
+
+      lua_pushinteger(L, (int)DIRECTION_IN);    lua_setfield(L, tableIndex, "IN");
+      lua_pushinteger(L, (int)DIRECTION_OUT);   lua_setfield(L, tableIndex, "OUT");
+
+      lua_setglobal(L, "gpio");
+
+      //---------------------------------------------------------------------------------
+
       // ========================================================================
       // AUTOMATISCHER START: init.lua von SD-Karte laden und ausführen
       // ========================================================================
@@ -3247,12 +3556,12 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
               break;
             case KEY_F2:
               inputBuffer = String("edit(\"") + currentEditingFilename + "\")\n";
-              currentEditingFilename = '\0';
+              currentEditingFilename = nullptr;
               ln = false;
               break;
             case KEY_F3:
               inputBuffer = String("run(\"") + currentEditingFilename + "\")\n";
-              currentEditingFilename = '\0';
+              currentEditingFilename = nullptr;
               ln = false;
               break;
             case KEY_F4:
@@ -3283,11 +3592,11 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
     //######################################################## SETUP #######################################################
     void setup() {
       Serial.begin(9600);                                                     // serielle Schnittstelle für DEBUG
-      delay(200);
-      pinMode(kSD_CS, OUTPUT);
-      digitalWrite(kSD_CS, HIGH);
+      //delay(200);
+      //pinMode(kSD_CS, OUTPUT);
+      //digitalWrite(kSD_CS, HIGH);
 
-      SPI.begin();
+      SPI.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
       Keyboard.begin(GPIO_NUM_33, GPIO_NUM_32);
       PS2Controller.keyboard() -> setLayout(&fabgl::GermanLayout);                       //deutsche Tastatur
       VGAController.begin();                                                             //VGA-Variante //64 oder 16 Farben
@@ -3303,19 +3612,36 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
       Terminal.clear();
       //GFX.clear();
       Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.0 ---");
+      
       // 1. SPI und SD-Karte starten
-      spiSD.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
+      spiSD.begin();
 
-      if (!SD.begin(kSD_CS, spiSD, speedHz)) {
+      if (!SD.begin(kSD_CS, spiSD)) {
         Terminal.print("SD-Karten-Fehler");
       } else {
         // Wenn die SD-Karte da ist, Ordner prüfen/erstellen
         if (!SD.exists("/lua")) {
           SD.mkdir("/lua");
         }
+      }
+      delay(100);      
+      //------------- nur bei Olimex - SBC ------------------------------------------
+      
+      if (Expander.begin()){
+        uint16_t ver = Expander.version();
+        Serial.printf("CH32V003 firmware version: %d.%d" EOL, ver >> 8, ver & 0xFF);
+      } else {
+        Serial.println("CH32V003 expander nicht gefunden oder SPI belegt!");
+      }
+      //------------- nur bei Olimex - SBC ------------------------------------------
 
+      delay(100);   
+      
+      if (!SD.begin(kSD_CS, spiSD)) {
+        Terminal.print("SD-Karten-Fehler");
       }
 
+      
       // Prüfen, ob PSRAM auf dem ESP32 überhaupt aktiv/vorhanden ist
       if (psramInit()) {
         // 1. Editor-Puffer im PSRAM anlegen
@@ -3327,7 +3653,6 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
         if (textBuffer != nullptr && clipboardBuffer != nullptr) {
           memset(textBuffer, 0, EDIT_BUFF_SIZE);
           memset(clipboardBuffer, 0, CLIPBOARD_SIZE);
-
 
         } else {
           Terminal.println("ERROR: Nicht genug PSRAM!");
@@ -3357,6 +3682,8 @@ void* lua_psram_allocator(void *ud, void *ptr, size_t osize, size_t nsize) {
         }
       }
       e_rtc.setTime(second, minute, hour, day, month, year);
+
+      
 
       //------------------------------------------------------------------
 
