@@ -23,6 +23,9 @@
 //                                                                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // ################################################### Projekt-Tagebuch ############################################################################
+// 07.08.2026
+// Lua-Befehl vga.swap(x,y,w,h) hinzugefügt um Bildschirmbereiche zu invertieren -> Filemanager in Lua auf swp umgebaut, das läuft jetzt flüssiger
+//
 // 03.08.2026
 // Flash-Loader hinzugefügt -> mit sys.flash(datei.bin) kann eine neue Software auf den ESP geladen werden
 //
