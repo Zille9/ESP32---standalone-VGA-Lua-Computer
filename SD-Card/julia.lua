@@ -28,7 +28,7 @@ local factorX = (maxX - minX) / screenWidth
 local factorY = (maxY - minY) / screenHeight
 
 -- DER JULIA-PARAMETER (C): 
--- Ändern Sie diese beiden Werte im Editor, um völlig neue Formen zu generieren!
+-- Ändern Sie diese beiden Werte im Editor, um voellig neue Formen zu generieren!
 -- Klassische schöne Werte: 
 -- c_re = -0.7,  c_im = 0.27015
 -- c_re = -0.4,  c_im = 0.6

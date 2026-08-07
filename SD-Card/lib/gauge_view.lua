@@ -12,7 +12,7 @@ local COL_HINTERGRUND = 0   -- Schwarz
 local fc,bc = vga.gcolor()
 COL_HINTERGRUND = bc -- Hintergrundfarbe dynamisch anpassen
 -- Interne Verlaufssicherung pro Tacho (Merker zum flackerfreien Löschen)
--- Unterstützt bis zu 5 verschiedene Tachos gleichzeitig auf dem Schirm!
+-- Unterstuetzt bis zu 5 verschiedene Tachos gleichzeitig auf dem Schirm!
 local altZeigerX = {}
 local altZeigerY = {}
 
@@ -124,5 +124,5 @@ function GaugeView.updateWert(id, mitteX, mitteY, radius, aktuellerWert, minWert
     vga.text(txtX, txtY, digitalText, COL_TEXT, COL_HINTERGRUND)
 end
 
--- Das komplette Modul an das require()-System übergeben
+-- Das komplette Modul an das require()-System uebergeben
 return GaugeView

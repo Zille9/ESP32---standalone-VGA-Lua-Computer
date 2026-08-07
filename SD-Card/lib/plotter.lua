@@ -8,7 +8,7 @@ local Plotter = {}
 local VIEW_X1 = 40   -- Pixel-Rand links für Beschriftung
 local VIEW_Y1 = 10   -- Pixel-Rand oben
 local VIEW_X2 = 310  -- Pixel-Rand rechts
-local VIEW_Y2 = 230  -- Pixel-Rand unten (Platz fuer X-Achse)
+local VIEW_Y2 = 210  -- Pixel-Rand unten (Platz fuer X-Achse)
 
 -- Standard-Wertebereiche der mathematischen Funktion
 local X_MIN = -2 * math.pi -- Startwert auf der X-Achse (ca. -6.28)

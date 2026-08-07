@@ -1,5 +1,5 @@
 -- ===================================================
--- LUA SIERPINSKI-DREIECK VIA CHAOS-SPIEL (640x480)
+-- LUA SIERPINSKI-DREIECK VIA CHAOS-SPIEL (320x240)
 -- ===================================================
 
 vga.cls()

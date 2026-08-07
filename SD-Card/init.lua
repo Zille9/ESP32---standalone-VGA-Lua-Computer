@@ -1,5 +1,5 @@
 -- ===================================================
--- TEENSY LUA SYSTEM INIT SKRIPT
+-- ESP32 LUA SYSTEM INIT SKRIPT
 -- ===================================================
 
 -- 1. Globales Farbschema beim Booten setzen (z.B. Weiss auf Dunkelblau)

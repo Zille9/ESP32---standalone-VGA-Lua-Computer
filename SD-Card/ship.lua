@@ -1,12 +1,12 @@
 -- ===================================================
--- LUA BURNING-SHIP-FRAKTAL FÜR TEENSY 4.1 VGA (640x480)
+-- LUA BURNING-SHIP-FRAKTAL FUER ESP32 VGA (320x240)
 -- ===================================================
 
 vga.cls()
 vga.pos(0, 0)
 
-local screenWidth  = 320 --640
-local screenHeight = 240 --480
+local screenWidth  = 320 
+local screenHeight = 240 
 
 -- Sichtfenster exakt auf das Schiff ausrichten (Werte sind sehr empfindlich!)
 local minX = -1.8

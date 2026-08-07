@@ -2,6 +2,7 @@ local a = sys.timer()
 local running=true
 local b = 0
 local c = 0
+local fc,bc = vga.gcolor() --aktuelle Bildschirmfarben merken
 while running do
      b=b+1
      
@@ -10,7 +11,7 @@ while running do
      end
 end
 
-vga.openWindow(0,100,60,160,70,255,4,"Benchmark",b*3 .. " Zeilen/sek.",3)
+vga.openWindow(0,100,60,160,70,255,4,"Benchmark",b*3 .. "-Zeilen/sek.",3)
 
 
 if waitkey(0) > 0 then
@@ -18,4 +19,6 @@ if waitkey(0) > 0 then
    vga.closeWindow(0)
 
 end
+vga.color(fc,bc) --Farben zuruecksetzen
+vga.cursor(true)
 collectgarbage("collect")

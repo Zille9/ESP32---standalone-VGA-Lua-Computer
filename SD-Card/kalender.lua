@@ -17,13 +17,13 @@ local TAGE_PRO_MONAT = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
 
 -- --- MATHEMATISCHE HILFSFUNKTIONEN ---
 
--- Prüft, ob ein Jahr ein Schaltjahr ist
+-- Prueft, ob ein Jahr ein Schaltjahr ist
 local function istSchaltjahr(jahr)
     return (jahr % 4 == 0 and jahr % 100 ~= 0) or (jahr % 400 == 0)
 end
 
 -- Zellers Kongruenz: Berechnet den Wochentag für den 1. eines Monats
--- Rückgabe: 1 = Montag, 2 = Dienstag, ..., 7 = Sonntag
+-- Rueckgabe: 1 = Montag, 2 = Dienstag, ..., 7 = Sonntag
 local function wochentagErster(monat, jahr)
     local m = monat
     local y = jahr
@@ -41,7 +41,7 @@ end
 
 -- --- ZEICHEN-LOGIK ---
 
--- Zeichnet das kompakte 2x6 Kalender-Raster für das gewählte Jahr
+-- Zeichnet das kompakte 2x6 Kalender-Raster fuer das gewaehlte Jahr
 local function zeichneKalender(zielJahr)
     vga.cls()
     
@@ -52,8 +52,8 @@ local function zeichneKalender(zielJahr)
     -- === 1. ÜBERSCHRIFTEN IM STANDARD-FONT RECHTS UND UNTEN SCHÜTZEN ===
     -- Da der Haupt-Font 6x8 nutzt, platzieren wir die Titel so, dass sie sich nicht beißen
     local titelText = "=== JAHRESKALENDER " .. zielJahr .. " ==="
-    vga.text(14, 0, titelText, COL_TITEL, COL_HINTERGRUND)
-    vga.text(5, 29, "Beliebige Taste = Neue Eingabe | ESC = Ende", 42, 0)
+    vga.text(12, 0, titelText, COL_TITEL, COL_HINTERGRUND)
+    vga.text(7, 29, "Beliebige Taste = Neue Eingabe | ESC = Ende", 42, 0)
 
     -- Schaltjahr-Anpassung für den Februar
     if istSchaltjahr(zielJahr) then
@@ -70,7 +70,7 @@ local function zeichneKalender(zielJahr)
         local zeile  = math.floor((m - 1) / 3) -- 0, 1, 2, 3
         
         -- HORIZONTALE VERTEILUNG (Volle 80 Spalten ausnutzen):
-        local startX = 2 + (spalte * 26)   
+        local startX = 4 + (spalte * 26)   
         
         -- VERTIKALE VERTEILUNG (Genügend Raum gegen Überschreiben):
         local startY = 2 + (zeile * 9)         
@@ -130,16 +130,17 @@ local running = true
 while running do
     -- 1. Eingabe-Aufforderung im Terminal (Perfekt angepasst auf 53er Breite)
     vga.cls()
-    vga.text(6, 10, "========================================", COL_WOCHENTAG, 0)
-    vga.text(6, 11, "        OS KALENDER-STEUERUNG           ", COL_TITEL, 0)
-    vga.text(6, 12, "========================================", COL_WOCHENTAG, 0)
-    vga.text(2, 15, "Jahr eingeben (z.B. 2026) oder ESC:", COL_TAGE, 0)
-    
+    vga.text(5, 10, "========================================", COL_WOCHENTAG, 0)
+    vga.text(5, 11, "        OS KALENDER-STEUERUNG           ", COL_TITEL, 0)
+    vga.text(5, 12, "========================================", COL_WOCHENTAG, 0)
+    vga.waitsync()
+    vga.text(5, 15, "Jahr eingeben (z.B. 2026) oder ESC:", COL_TAGE, 0)
+
     -- Wir holen uns das aktuelle Jahr als Standardwert aus der RTC
     local _, _, rtcJahr = sys.getdate()
     
     local eingabeString = ""
-    vga.text(38, 15, "_", COL_TITEL, 0) -- Cursor-Dummy
+    --vga.text(45, 15, "_", COL_TITEL, 0) -- Cursor-Dummy
     
     while true do
         local t = waitkey(false) -- Nutzt Ihre blockierende Tastatur-Wartefunktion
@@ -151,11 +152,11 @@ while running do
             break
         elseif t == 127 and string.len(eingabeString) > 0 then -- BACKSPACE
             eingabeString = string.sub(eingabeString, 1, -2)
-            vga.text(38 + string.len(eingabeString), 15, "  ") -- Zeichen putzen
+            vga.text(48 + string.len(eingabeString), 15, "  ") -- Zeichen putzen
         elseif t >= 48 and t <= 57 then -- Nur Zahlen zulassen
             if string.len(eingabeString) < 4 then
                 eingabeString = eingabeString .. string.char(t)
-                vga.text(38, 15, eingabeString .. "_", COL_TITEL, 0)
+                vga.text(40, 15, eingabeString .. "_", COL_TITEL, 0)
             end
         end
         delay(10)
