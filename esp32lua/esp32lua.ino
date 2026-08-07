@@ -23,6 +23,9 @@
 //                                                                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // ################################################### Projekt-Tagebuch ############################################################################
+// 03.08.2026
+// Flash-Loader hinzugefügt -> mit sys.flash(datei.bin) kann eine neue Software auf den ESP geladen werden
+//
 // 21.07.2026
 // Olimex-SBC-Board angekommen, die GPIO-Funktionen waren schwer zu knacken - durch den SPI-Port der gleichzeitig von der SD-Karte benutzt wird
 // gestaltete sich die Umsetzung etwas hakelig aber jetzt funktioniert das Pin-Sharing
@@ -91,9 +94,10 @@ byte y_char[]  PROGMEM = {8, 8, 8, 14, 20, 14, 14, 16, 16, 14, 14, 14, 16, 10, 1
 
 int current_Font = 26;                                   //Systemfont 6x8Pixel
 // Terminal-Größe
-const int MAX_C = 320 / x_char[current_Font];           //Anzahl Textspalten
-const int MAX_R = 240 / y_char[current_Font];           //Anzahl Textzeilen
-
+uint16_t  Display_breite = 320;
+uint16_t  Display_hoehe  = 240;
+const int MAX_C = Display_breite / x_char[current_Font];           //Anzahl Textspalten
+const int MAX_R = Display_hoehe / y_char[current_Font];           //Anzahl Textzeilen
 
 String inputBuffer = "";
 uint8_t fColor = 63;  // Vordergrundfarbe weiss
@@ -104,7 +108,6 @@ bool Cursor = true;   //globaler Cursor-Merker
 // Globaler Bildschirmpuffer für Overlays/Popups (im PSRAM)
 RGB222* globalScreenBackup = nullptr;
 Rect globalBackupRect; // Merkt sich die ursprüngliche Position und Größe
-
 
 //------------------------------------------ Tastatur,GFX-Treiber- und Terminaltreiber -------------------------------------------------------------
 fabgl::PS2Controller    PS2Controller;
@@ -793,6 +796,21 @@ extern "C" {
     return 0;
   }
 
+  int lua_vga_swap(lua_State* L){
+    if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2) || !lua_isnumber(L, 3) || !lua_isnumber(L, 4)) {
+      Terminal.print("FEHLER: vga.swap(x1, y1, w2, h2, farbe])");
+      lua_pushboolean(L, false);
+      return 1;
+    }
+    int x1 = (int)lua_tonumber(L, 1);
+    int y1 = (int)lua_tonumber(L, 2);
+    int w2 = (int)lua_tonumber(L, 3);
+    int h2 = (int)lua_tonumber(L, 4);
+    GFX.swapRectangle(x1, y1,x1 + w2, y1 + h2);                      
+    return 0;
+  }
+
+  
   // 7. Gefuellte Ellipse: vga.filledellipse(x, y, w, h [bcolor])
   int lua_vga_filledellipse(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2) || !lua_isnumber(L, 3) || !lua_isnumber(L, 4)) {
@@ -1108,13 +1126,16 @@ extern "C" {
       return 1;
     }
 
-    int vh = 320;
-    int vv = 240;
+    int vh = Display_breite;//320;
+    int vv = Display_hoehe;//240;
 
     // Header-Bytes extrahieren
-    uint32_t xx = bmp_header[18] | ((uint32_t)bmp_header[19] << 8) | ((uint32_t)bmp_header[20] << 16) | ((uint32_t)bmp_header[21] << 24);
-    uint32_t yy = bmp_header[22] | ((uint32_t)bmp_header[23] << 8) | ((uint32_t)bmp_header[24] << 16) | ((uint32_t)bmp_header[25] << 24);
+    int32_t xx = bmp_header[18] | ((uint32_t)bmp_header[19] << 8) | ((uint32_t)bmp_header[20] << 16) | ((uint32_t)bmp_header[21] << 24);
+    int32_t yy = bmp_header[22] | ((uint32_t)bmp_header[23] << 8) | ((uint32_t)bmp_header[24] << 16) | ((uint32_t)bmp_header[25] << 24);
     uint32_t bmpImageoffset = bmp_header[10] | ((uint32_t)bmp_header[11] << 8) | ((uint32_t)bmp_header[12] << 16) | ((uint32_t)bmp_header[13] << 24);
+
+    xx = abs(xx);
+    yy = abs(yy);
 
     uint32_t rowSize = (xx * 3 + 3) & ~3;
 
@@ -1135,43 +1156,60 @@ extern "C" {
     // --------------------------------------------------
 
     //Zeilenpuffer auf dem Stack anlegen
-    uint8_t* rowBuffer = (uint8_t*)alloca(rowSize);
+    uint8_t* rowBuffer = (uint8_t*)malloc(rowSize);
     uint32_t fp_xtmp = (uint32_t)(xtmp * 65536.0f);
+    int lastSourceY = -1;
+
+    Terminal.printf("BMP-Groesse laut Header: %d x %d Pixel, Offset: %d\r\n", xx, yy, bmpImageoffset);
 
     for (int row = 0; row < targetHeight; row++) {
-      int sourceY = (int)yy - 1 - (int)((float)row * ytmp);
-      if (sourceY < 0) break;
-      if (sourceY >= (int)yy) continue; // Sicherheitsprüfung
+      if ((row & 15) == 0) yield();
 
-      uint32_t rowStartPos = bmpImageoffset + (sourceY * rowSize);
-      fp.seek(rowStartPos);
-      fp.read(rowBuffer, rowSize);                                  // Gesamte Zeile am Stück streamen
+      // 1. Richtung beibehalten, damit das Bild nicht auf dem Kopf steht!
+      int sourceY = (yy < 0) ? (int)((float)row * ytmp) : (abs(yy) - 1 - (int)((float)row * ytmp));
+
+      // Sicherheits-Check gegen Überlauf (Nutzt jetzt den absoluten Wert für die Grenze)
+      if (sourceY < 0 || sourceY >= abs(yy)) continue;
 
       int sy = row + y_offset;
-      if (sy < 0 || sy >= vv) continue;                             // Außerhalb des vertikalen Bildschirms? Überspringen.
+      if (sy < 0 || sy >= vv) continue;
 
-      uint32_t fp_sourceX = 0;                                      // X-Zähler
+      // Zeile nur laden, wenn wir im Quellbild wirklich eine neue Zeile erreicht haben
+      if (sourceY != lastSourceY) {
+        uint32_t rowStartPos = bmpImageoffset + (sourceY * rowSize);
+        fp.seek(rowStartPos);
+        fp.read(rowBuffer, rowSize);
+        lastSourceY = sourceY;
+      }
+
+      uint32_t fp_sourceX = 0;
 
       for (int col = 0; col < targetWidth; col++) {
         uint32_t sourceX = fp_sourceX >> 16;
-        if (sourceX >= xx) break;
+
+        if (sourceX >= xx) {
+          sourceX = xx - 1;
+        }
 
         int sx = col + x_offset;
         if (sx >= 0 && sx < vh) {
           uint32_t bufIdx = sourceX * 3;
-          uint8_t farbNummer = ((rowBuffer[bufIdx + 2] & 0xC0) >> 2) |  // Rot:   Die obersten 2 Bits -> Bits 4 und 5
-                               ((rowBuffer[bufIdx + 1] & 0xC0) >> 4) |  // Grün:  Die obersten 2 Bits -> Bits 2 und 3
-                               ((rowBuffer[bufIdx]     & 0xC0) >> 6);   // Blau:  Die obersten 2 Bits -> Bits 0 und 1
-          fcolor(farbNummer);
-          GFX.setPixel(sx, sy);
-          fcolor(fColor);
-        }
 
+          uint8_t b = rowBuffer[bufIdx];
+          uint8_t g = rowBuffer[bufIdx + 1];
+          uint8_t r = rowBuffer[bufIdx + 2];
+
+          // Pixel an das FabGL-Display übergeben
+          GFX.setPixel(sx, sy, fabgl::RGB888(r, g, b));
+        }
         fp_sourceX += fp_xtmp;
       }
     }
 
+
     fp.close();
+    free(rowBuffer);
+    fcolor(fColor);
     lua_pushboolean(L, true);
     return 1;
   }
@@ -1330,21 +1368,19 @@ extern "C" {
   }
   void drawTitleBar(char* titletext) {
     fbcolor(0, 15);
-
     tc.setCursorPos(1, 1);
-    Terminal.write("\x1b[K");                                              //komplette Zeile mit weissem Hintergrund
-    Terminal.print(titletext);
+    Terminal.write("\x1b[K");                                              //komplette Zeile mit cyan Hintergrund
+    Terminal.write(titletext);
     GFX.waitCompletion(false);
     fbcolor(63, 1);
   }
 
   void drawStatusBar(char* statusb) {
-    fbcolor(0, 15);
-
-    int ypix = (MAX_R - 1) * 8;
+    int ypix = (MAX_R - 1) * y_char[current_Font];
     tc.setCursorPos(0, MAX_R);
-    Terminal.write("\x1b[K");                                              //komplette Zeile mit weissem Hintergrund
-    Terminal.print(statusb);
+    fbcolor(0, 15);
+    Terminal.write("\x1b[K");                                              //komplette Zeile mit cyan Hintergrund
+    Terminal.write(statusb);
     GFX.waitCompletion(false);
     fbcolor(63, 1);
   }
@@ -1354,12 +1390,13 @@ extern "C" {
     Terminal.enableCursor(false);
     tc.setCursorPos(1, 1);
     fbcolor(0, 15);
-    delay(2);
-    tc.setCursorPos(1, 1);
+    //tc.setCursorPos(1, 1);
     Terminal.write("\x1b[K");                                              //komplette Zeile mit cyan Hintergrund
-    GFX.drawText(&fabgl::FONT_5x8, 2, 0, "F1=Menu F2=Copy F3=Paste F4=Suche | ");
-    GFX.drawText(&fabgl::FONT_5x8, 41 * 5, 0, currentEditingFilename);
-    GFX.waitCompletion(false);
+    Terminal.write("F1=Menu F2=Copy F3=Paste F4=Suche | ");
+    //GFX.drawText(&fabgl::FONT_5x8, 2, 0, "F1=Menu F2=Copy F3=Paste F4=Suche | ");
+    Terminal.write(currentEditingFilename);
+    //GFX.drawText(&fabgl::FONT_5x8, 41 * 5, 0, currentEditingFilename);
+    //GFX.waitCompletion(false);
     fbcolor(63, 1);
     tc.setCursorPos(1, 2);
     Terminal.enableCursor(Cursor);
@@ -1387,7 +1424,7 @@ extern "C" {
     Terminal.enableCursor(false);
     //drawTitleLine();
     //fbcolor(63, 1);
-    GFX.fillRectangle(0, 8, MAX_C * 6, (MAX_R * 8) - 8);      // Editor-Bereich löschen
+    GFX.fillRectangle(0, y_char[current_Font], MAX_C * x_char[current_Font], (MAX_R * y_char[current_Font]) - y_char[current_Font]);      // Editor-Bereich löschen
     tc.setCursorPos(1, 2);
 
     uint32_t i = topIndex;
@@ -1527,7 +1564,6 @@ extern "C" {
 
   bool runFullscreenEditor(const char* filename, int zielZeile) {
     bool st = false;
-
     fbcolor(15, 4);
     GFX.clear();
     drawTitleLine();
@@ -1747,8 +1783,8 @@ extern "C" {
           int sX = 1, sY = 2, sW = 52, sH = 3;
           Terminal.enableCursor(false);
           fbcolor(48, 57);                                                  //roter Rahmen, orange Hintergrund
-          GFX.fillRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
-          GFX.drawRectangle(sX * 6, sY * 8, (sX + sW) * 6, (sY + sH) * 8);
+          GFX.fillRectangle(sX * x_char[current_Font], sY * y_char[current_Font], (sX + sW) * x_char[current_Font], (sY + sH) * y_char[current_Font]);
+          GFX.drawRectangle(sX * x_char[current_Font], sY * y_char[current_Font], (sX + sW) * x_char[current_Font], (sY + sH) * y_char[current_Font]);
           fbcolor(0, 57);                                                   //schwarzer Text auf orange Hintergrund
           tc.setCursorPos(sX + 2, sY + 2);
           Terminal.print("Suchen: ");
@@ -2907,6 +2943,72 @@ return 1;
       return 3; // 3 Rückgabewerte an Lua (Tag, Monat, Jahr)
     }
 
+    //#################################### Flash-Loader ##############################################
+    //------------------------------------- Loader für Bin-Dateien -----------------------------------
+    //sys.flash(dateiname)
+    int lua_sys_flash(lua_State* L) {
+      if (!lua_isstring(L, 1)) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Dateiname fehlt!");
+        return 2;
+      }
+
+      String filename = lua_tostring(L, 1);
+
+      if (!filename.startsWith("/")) {
+        filename = "/" + filename;
+      }
+
+      File updateBin = SD.open(filename);
+      if (updateBin) {
+        size_t updateSize = updateBin.size();
+
+        if (updateSize > 0) {
+          Terminal.println("lade " + String(filename));
+          performUpdate(updateBin, updateSize);
+        }
+        else {
+          Terminal.println("Fehler, Datei ist leer");
+        }
+        updateBin.close();
+      }
+      else {
+        Terminal.println("Kann BIN-Datei nicht laden");
+      }
+    }
+
+    // perform the actual update from a given streams
+    void performUpdate(Stream &updateSource, size_t updateSize) {
+      if (Update.begin(updateSize)) {
+        size_t written = Update.writeStream(updateSource);
+        if (written == updateSize) {
+          Terminal.println("Schreiben von: " + String(written) + " erfolgreich");
+        }
+        else {
+          Terminal.println("Nur: " + String(written) + "/" + String(updateSize) + ". Nochmal?");
+        }
+        if (Update.end()) {
+          Terminal.println("OTA fertig!");
+          if (Update.isFinished()) {
+            Terminal.println("Starte neu.");
+            delay(1000);
+            ESP.restart();
+          }
+          else {
+            Terminal.println("nicht beendet? etwas ist schief gelaufen!");
+          }
+        }
+        else {
+          Terminal.println("Fehler Error #: " + String(Update.getError()));
+        }
+
+      }
+      else
+      {
+        Terminal.println("Nicht genügend RAM fuer OTA");
+      }
+    }
+    //######################################################################################
     //********************************************** System-Funktionen *****************
     // ============================================================================
     // SYSTEM INTERFACE
@@ -3085,32 +3187,32 @@ return 1;
       }
     }
     //############################################ GPIO Funktionen ####################################################
-int lua_gpioTest(lua_State* L) {
-    // 1. PHASE: Pin 9 (PORTD, Pin 4) exakt wie im C++ Example als Eingang konfigurieren
-    Expander.configureUEXT (GPIO_Pin_6, DIRECTION_IN,1);    // Pull up/down: GPIO4 pulled down (0)
-  
+    int lua_gpioTest(lua_State* L) {
+      // 1. PHASE: Pin 9 (PORTD, Pin 4) exakt wie im C++ Example als Eingang konfigurieren
+      Expander.configureUEXT (GPIO_Pin_6, DIRECTION_IN, 1);   // Pull up/down: GPIO4 pulled down (0)
 
-    // Eine kleine Hardware-Atempause für den geteilten SPI-Bus und den Inverter
-    vTaskDelay(pdMS_TO_TICKS(10));
-    yield();
 
-    // 2. PHASE: Den Wert direkt als Ganzzahl (int) auslesen (0, 8, 16 etc.)
-    int raw_value = Expander.readUEXT (GPIO_6);
+      // Eine kleine Hardware-Atempause für den geteilten SPI-Bus und den Inverter
+      vTaskDelay(pdMS_TO_TICKS(10));
+      yield();
 
-    // 3. PHASE: Für uns im Seriellen Monitor der Arduino-IDE protokollieren
-    Serial.printf("[C++ GPIO-Test] Roher Register-Wert von PD4: %d\n", raw_value);
-    Serial.flush();
+      // 2. PHASE: Den Wert direkt als Ganzzahl (int) auslesen (0, 8, 16 etc.)
+      int raw_value = Expander.readUEXT (GPIO_6);
 
-    // Normierung: Jede Zahl größer als 0 wird für Lua zu einer sauberen 1, 0 bleibt 0
-    int final_level = raw_value;//(raw_value > 0) ? 1 : 0;
+      // 3. PHASE: Für uns im Seriellen Monitor der Arduino-IDE protokollieren
+      Serial.printf("[C++ GPIO-Test] Roher Register-Wert von PD4: %d\n", raw_value);
+      Serial.flush();
 
-    // Wert zurück an Lua geben
-    lua_pushinteger(L, final_level);
-    return 1;
-}
-    
-    
-    
+      // Normierung: Jede Zahl größer als 0 wird für Lua zu einer sauberen 1, 0 bleibt 0
+      int final_level = raw_value;//(raw_value > 0) ? 1 : 0;
+
+      // Wert zurück an Lua geben
+      lua_pushinteger(L, final_level);
+      return 1;
+    }
+
+
+
     //---------------------------------- gpio.config("mode",parameters) ------------------------------------
 
     int lua_gpioConfig(lua_State* L) {
@@ -3164,7 +3266,7 @@ int lua_gpioTest(lua_State* L) {
 
         // Der originale, funktionierende Bibliotheks-Aufruf
         Expander.configurePort(port, mask_pins, mask_dirs, mask_pull);
-        
+
         vTaskDelay(pdMS_TO_TICKS(5)); // SPI-Beruhigungspause
         return 0;
       }
@@ -3355,7 +3457,7 @@ int lua_gpioTest(lua_State* L) {
         if (uext_pin == 10) {
           raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_3);  // PD3 -> Liefert 8
         }
-        
+
         // 3. Normierung: !! verwandelt 16 oder 8 in eine 1. 0 bleibt 0.
         int final_level = !!raw_value;
 
@@ -3374,6 +3476,18 @@ int lua_gpioTest(lua_State* L) {
           return 1;
         }
       }
+      // === NEU: SUB-SYSTEM BATTERIE ===
+      else if (strcmp(target, "BATTERY") == 0) {
+        // Holt die Spannung in Millivolt (z.B. 3820)
+        uint16_t mv = Expander.batterySense();
+        // Umwandlung in eine Fließkommazahl in Volt (z.B. 3.82)
+        float voltage = (float)mv / 1000.0f;
+        // Übergibt die Gleitkommazahl sicher an Lua
+        lua_pushnumber(L, voltage);
+        return 1; // 1 Rückgabewert an Lua
+      }
+
+
       else if (strcmp(target, "UART") == 0) {
         uint8_t size = luaL_checkinteger(L, 2);
         if (size == 0) {
@@ -3399,8 +3513,8 @@ int lua_gpioTest(lua_State* L) {
       bool ln = true;
       int c;
       //L = luaL_newstate();
-      
-      
+
+
       lua_State *L = lua_newstate(lua_psram_allocator, nullptr, 0);
       if (L == nullptr) {
         Terminal.println("CRITICAL ERROR: Lua konnte nicht im PSRAM gestartet werden!");
@@ -3451,6 +3565,7 @@ int lua_gpioTest(lua_State* L) {
       lua_pushcfunction(L, lua_vga_cursor_onoff);  lua_setfield(L, -2, "cursor");
       lua_pushcfunction(L, lua_vga_bmpload);       lua_setfield(L, -2, "bmpLoad");
       lua_pushcfunction(L, lua_vga_bmpsave);       lua_setfield(L, -2, "bmpSave");
+      lua_pushcfunction(L, lua_vga_swap);          lua_setfield(L, -2, "swap");
       lua_setglobal(L, "vga");        // Die Tabelle "vga" registrieren
       //-------------------------------- Lua sys-Funktionen -----------------------------
       lua_newtable(L);
@@ -3458,6 +3573,7 @@ int lua_gpioTest(lua_State* L) {
       lua_pushcfunction(L, lua_sys_load);          lua_setfield(L, -2, "load");
       lua_pushcfunction(L, sys_get_time);          lua_setfield(L, -2, "gettime");
       lua_pushcfunction(L, sys_get_date);          lua_setfield(L, -2, "getdate");
+      lua_pushcfunction(L, lua_sys_flash);         lua_setfield(L, -2, "flash");
       lua_setglobal(L, "sys");
       //-------------------------------- Lua sd-Funktionen ------------------------------
       // Eine neue Tabelle für die SD-Bibliothek in Lua erstellen
@@ -3600,7 +3716,7 @@ int lua_gpioTest(lua_State* L) {
       Keyboard.begin(GPIO_NUM_33, GPIO_NUM_32);
       PS2Controller.keyboard() -> setLayout(&fabgl::GermanLayout);                       //deutsche Tastatur
       VGAController.begin();                                                             //VGA-Variante //64 oder 16 Farben
-      //VGAController.setFont(&fabgl::FONT_5x7);
+
       VGAController.setResolution(QVGA_320x240_60Hz);                                    //Standard-Auflösung
       Terminal.begin(&VGAController);
       Terminal.activate(TerminalTransition::None);
@@ -3612,7 +3728,7 @@ int lua_gpioTest(lua_State* L) {
       Terminal.clear();
       //GFX.clear();
       Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.0 ---");
-      
+
       // 1. SPI und SD-Karte starten
       spiSD.begin();
 
@@ -3624,10 +3740,10 @@ int lua_gpioTest(lua_State* L) {
           SD.mkdir("/lua");
         }
       }
-      delay(100);      
+      delay(100);
       //------------- nur bei Olimex - SBC ------------------------------------------
-      
-      if (Expander.begin()){
+
+      if (Expander.begin()) {
         uint16_t ver = Expander.version();
         Serial.printf("CH32V003 firmware version: %d.%d" EOL, ver >> 8, ver & 0xFF);
       } else {
@@ -3635,13 +3751,13 @@ int lua_gpioTest(lua_State* L) {
       }
       //------------- nur bei Olimex - SBC ------------------------------------------
 
-      delay(100);   
-      
+      delay(100);
+
       if (!SD.begin(kSD_CS, spiSD)) {
         Terminal.print("SD-Karten-Fehler");
       }
 
-      
+
       // Prüfen, ob PSRAM auf dem ESP32 überhaupt aktiv/vorhanden ist
       if (psramInit()) {
         // 1. Editor-Puffer im PSRAM anlegen
@@ -3683,7 +3799,7 @@ int lua_gpioTest(lua_State* L) {
       }
       e_rtc.setTime(second, minute, hour, day, month, year);
 
-      
+
 
       //------------------------------------------------------------------
 
