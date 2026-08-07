@@ -186,7 +186,7 @@ CH32V003 Expander;
 #define kSD_MISO 35
 // ------ Board_Type TTGO ---------------------------- 
 // Board_Type TTGO
-//  #define kSD_MISO 2
+//#define kSD_MISO 2
 #define kSD_CS   13
 #define kSD_MOSI 12
 #define kSD_CLK  14
@@ -1393,13 +1393,10 @@ extern "C" {
     Terminal.enableCursor(false);
     tc.setCursorPos(1, 1);
     fbcolor(0, 15);
-    //tc.setCursorPos(1, 1);
     Terminal.write("\x1b[K");                                              //komplette Zeile mit cyan Hintergrund
     Terminal.write("F1=Menu F2=Copy F3=Paste F4=Suche | ");
-    //GFX.drawText(&fabgl::FONT_5x8, 2, 0, "F1=Menu F2=Copy F3=Paste F4=Suche | ");
     Terminal.write(currentEditingFilename);
-    //GFX.drawText(&fabgl::FONT_5x8, 41 * 5, 0, currentEditingFilename);
-    //GFX.waitCompletion(false);
+    GFX.waitCompletion(false);
     fbcolor(63, 1);
     tc.setCursorPos(1, 2);
     Terminal.enableCursor(Cursor);
@@ -3190,6 +3187,7 @@ return 1;
       }
     }
     //############################################ GPIO Funktionen ####################################################
+
     int lua_gpioTest(lua_State* L) {
       // 1. PHASE: Pin 9 (PORTD, Pin 4) exakt wie im C++ Example als Eingang konfigurieren
       Expander.configureUEXT (GPIO_Pin_6, DIRECTION_IN, 1);   // Pull up/down: GPIO4 pulled down (0)
@@ -3711,9 +3709,6 @@ return 1;
     //######################################################## SETUP #######################################################
     void setup() {
       Serial.begin(9600);                                                     // serielle Schnittstelle für DEBUG
-      //delay(200);
-      //pinMode(kSD_CS, OUTPUT);
-      //digitalWrite(kSD_CS, HIGH);
 
       SPI.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
       Keyboard.begin(GPIO_NUM_33, GPIO_NUM_32);
@@ -3745,7 +3740,6 @@ return 1;
       }
       delay(100);
       //------------- nur bei Olimex - SBC ------------------------------------------
-
       if (Expander.begin()) {
         uint16_t ver = Expander.version();
         Serial.printf("CH32V003 firmware version: %d.%d" EOL, ver >> 8, ver & 0xFF);
