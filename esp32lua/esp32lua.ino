@@ -10,12 +10,12 @@
 //                              Farb- und Grafikfunktionen 64 Farben                                                                              //
 //                              mathematische Funktionen                                                                                          //
 //                              SD-Card-Funktionen                                                                                                //
-//                              Flashloader für bin-Dateien - fehlt noch                                                                          //
+//                              Flashloader für bin-Dateien                                                                                       //
 //                                                                                                                                                //
 //                                                                                                                                                //
 //      von:Reinhard Zielinski <zille09@gmail.com>                                                                                                //
 //                                                                                                                                                //
-//      Connections: SD-Card -> TTGO VGA 1.4                                                                                                      //
+//      Connections: SD-Card -> TTGO VGA 1.4 oder OLIMEX SBC                                                                                      //
 //                   VGA-Beschaltung: siehe FabGl/TTGO VGA                                                                                        //
 //                                                                                                                                                //
 //                                                                                                                                                //
@@ -24,7 +24,10 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // ################################################### Projekt-Tagebuch ############################################################################
 // 07.08.2026
-// Lua-Befehl vga.swap(x,y,w,h) hinzugefügt um Bildschirmbereiche zu invertieren -> Filemanager in Lua auf swp umgebaut, das läuft jetzt flüssiger
+// Lua-Befehl vga.swap(x,y,w,h) hinzugefügt um Bildschirmbereiche zu invertieren -> Filemanager in Lua auf swap umgebaut, das läuft jetzt flüssiger
+// Lua-Befehl sd.hexmon(dateiname) hinzugefügt, um Dateien im Hexmonitor-Stil anzuzeigen
+// einige kleinere optische Verbesserungen
+// Boardauswahl OLIMEX-SBC oder TTGO1.4 hinzugefügt
 //
 // 03.08.2026
 // Flash-Loader hinzugefügt -> mit sys.flash(datei.bin) kann eine neue Software auf den ESP geladen werden
@@ -63,6 +66,10 @@
 // Bearbeitungs- und Lua-Speicher in den PSRAM ausgelagert, das schafft massiv Platz
 // Window-Funktionen sind jetzt ebenfalls integriert, auch überlappende Fenster funktionieren, solange man immer das oberste Fenster zuerst wieder löscht
 //
+//******************** BOARD-AUSWAHL **********************
+#define OLIMEX
+//#define TTGO
+//*********************************************************
 
 #include <Arduino.h>
 #include "fabgl.h" //********************************************* Bibliotheken zur VGA-Signalerzeugung *********************************************
@@ -180,13 +187,18 @@ static File openFiles[MAX_OPEN_FILES];
 //---------------- Board-Auswahl ---------------------
 
 // ------ Board_Type OLIMEX_SBC ----------------------
+#ifdef OLIMEX
 #include "CH32V003.h"
 CH32V003 Expander;
-
 #define kSD_MISO 35
+#else
 // ------ Board_Type TTGO ---------------------------- 
 // Board_Type TTGO
-//#define kSD_MISO 2
+#define kSD_MISO 2
+#endif
+//----------------------------------------------------
+
+
 #define kSD_CS   13
 #define kSD_MOSI 12
 #define kSD_CLK  14
@@ -203,12 +215,6 @@ ESP32Time e_rtc(0);  // offset in seconds GMT+1
 //-------------------------------------------------------------------------------------------------------------------------------------------------
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------
-/*
-  #include <Wire.h>           // for I2C
-  #include "RTClib.h"         //to show time
-  TwoWire myI2C = TwoWire(0); //eigenen I2C-Bus erstellen
-  RTC_DS3231 rtc;
-*/
 #include <vector>
 
 TaskHandle_t LuaTaskHandle = NULL;
@@ -250,9 +256,6 @@ extern "C" {
     int _kill(int pid, int sig) {
       return -1;
     }
-    // int system(const char *command) {
-    //   return -1;
-    // }
   }
 
 
@@ -477,7 +480,7 @@ extern "C" {
   static uint16_t wait_key(bool modes) {
     if (modes) {
       Terminal.println();
-      Terminal.println("SPACE<Continue>/CTR+C <Exit>");
+      Terminal.println("SPACE<Continue>/ESC <Exit>");
     }
     return inchar();
   }
@@ -548,15 +551,38 @@ extern "C" {
   }
 
   //************************************* Lua-info() *********************************************
+int lua_info(lua_State *L) {
+    uint32_t freeHeap = ESP.getFreeHeap();
+    int luaMemKb = lua_gc(L, LUA_GCCOUNT, 0);
+    int luaMemBytesRemainder = lua_gc(L, LUA_GCCOUNTB, 0);
+    uint32_t totalLuaBytes = (luaMemKb * 1024) + luaMemBytesRemainder;
+    
+    Terminal.println();
+    Terminal.println("--- SYSTEM SPEICHER & VERSION ---");
+    Terminal.printf(" Lua Version             : %s\n\r", LUA_RELEASE); 
+    Terminal.printf(" Interner RAM (Heap) frei: %d Bytes (%d KB)\n\r", freeHeap, freeHeap / 1024);
+    Terminal.printf(" max. Lua PSRAM          : %d Bytes (%d KB)\n\r", LUA_MAX_PSRAM, LUA_MAX_PSRAM / 1024);
+    Terminal.printf(" Lua-Engine belegt       : %d Bytes (%d KB)\n\r", totalLuaBytes, luaMemKb);
+    Terminal.printf(" Lua PSRAM-Auslastung    : %.2f%% \n\r", ((float)luaCurrentMemoryUsage / LUA_MAX_PSRAM) * 100.0);
+    Terminal.printf(" freier PSRAM gesamt     : %d Bytes\n\r", ESP.getFreePsram());
+    Terminal.printf(" Editor Puffergroesse    : %d Bytes (%d KB)\n\r", textLen, EDIT_BUFF_SIZE / 1024);
+    Terminal.println("---------------------------------");
+    
+    // Rückgabewerte an das Lua-Skript:
+    lua_pushinteger(L, freeHeap);   // 1. Rückgabewert: Freier Heap (Zahl)
+    lua_pushstring(L, LUA_RELEASE); // 2. Rückgabewert: Version (String)
+    
+    return 2; // Signalisisiert Lua, dass jetzt 2 Werte auf dem Stack liegen
+}
+/*
   int lua_info(lua_State *L) {
     uint32_t freeHeap = ESP.getFreeHeap();
     int luaMemKb = lua_gc(L, LUA_GCCOUNT, 0);
     int luaMemBytesRemainder = lua_gc(L, LUA_GCCOUNTB, 0);
     uint32_t totalLuaBytes = (luaMemKb * 1024) + luaMemBytesRemainder;
-
+    Terminal.println();
     Terminal.println("--- SYSTEM SPEICHER ---");
     Terminal.printf(" Interner RAM (Heap) frei: %d Bytes (%d KB)\n\r", freeHeap, freeHeap / 1024);
-    // Terminal.printf(" Intern.RAM v.Lua belegt : %d Bytes (%d KB)\n\r", luaCurrentMemoryUsage, freeHeap / 1024);
     Terminal.printf(" max. Lua PSRAM          : %d Bytes (%d KB)\n\r", LUA_MAX_PSRAM, LUA_MAX_PSRAM / 1024);
     Terminal.printf(" Lua-Engine belegt       : %d Bytes (%d KB)\n\r", totalLuaBytes, luaMemKb);
     Terminal.printf(" Lua PSRAM-Auslastung    : %.2f%% \n\r", ((float)luaCurrentMemoryUsage / LUA_MAX_PSRAM) * 100.0);
@@ -566,7 +592,7 @@ extern "C" {
     lua_pushinteger(L, freeHeap);
     return 1;
   }
-
+*/
   //********************************************** Grafikfunktionen *************************************
   // ============================================================================
   // VGA GRAPHICS INTERFACE (Modul: vga)
@@ -799,7 +825,7 @@ extern "C" {
     return 0;
   }
 
-  int lua_vga_swap(lua_State* L){
+  int lua_vga_swap(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2) || !lua_isnumber(L, 3) || !lua_isnumber(L, 4)) {
       Terminal.print("FEHLER: vga.swap(x1, y1, w2, h2, farbe])");
       lua_pushboolean(L, false);
@@ -809,11 +835,11 @@ extern "C" {
     int y1 = (int)lua_tonumber(L, 2);
     int w2 = (int)lua_tonumber(L, 3);
     int h2 = (int)lua_tonumber(L, 4);
-    GFX.swapRectangle(x1, y1,x1 + w2, y1 + h2);                      
+    GFX.swapRectangle(x1, y1, x1 + w2, y1 + h2);
     return 0;
   }
 
-  
+
   // 7. Gefuellte Ellipse: vga.filledellipse(x, y, w, h [bcolor])
   int lua_vga_filledellipse(lua_State* L) {
     if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2) || !lua_isnumber(L, 3) || !lua_isnumber(L, 4)) {
@@ -2574,13 +2600,79 @@ extern "C" {
     return 1;
   }
 
-  //---------------------------------------------- sd.listfile() ------------------------------------------------------------
+  //---------------------------------------------- sd.hexmon(Datei) ------------------------------------------------------------
+  //15. Funktion sd.hexmon(dateiname)
+  int lua_sd_hexmon(lua_State* L) {
+    const char* dateiname = luaL_checkstring(L, 1);
+    String Pfad = resolve_lua_path(dateiname);
 
-  // 15. erstellt eine Tabelle der Dateien auf der SD-Karte (REINER DATEINAME)
+    File datei = SD.open(Pfad.c_str(), FILE_READ);
+    if (!datei) {
+      Terminal.print("FEHLER: Datei konnte nicht geoeffnet werden.\n");
+      lua_pushboolean(L, false);
+      return 1;
+    }
+
+    unsigned int offset = 0; // Speicheradresse/Offset in der Datei
+    int ausgegebeneZeilen = 0;
+    uint8_t puffer[8];
+
+    while (datei.available() > 0) {
+      // Bis zu 16 Bytes aus der Datei lesen
+      int geleseneBytes = datei.read(puffer, sizeof(puffer));
+      if (geleseneBytes <= 0) break;
+
+      // 1. Offset ausgeben (8-stellig, Hexadezimal)
+      char offsetStr[12];
+      snprintf(offsetStr, sizeof(offsetStr), " %08X: ", offset);
+      Terminal.print(offsetStr);
+
+      // 2. Hexadezimale Werte ausgeben
+      for (int i = 0; i < 8; i++) {
+        if (i < geleseneBytes) {
+          char hexStr[4];
+          snprintf(hexStr, sizeof(hexStr), "%02X ", puffer[i]);
+          Terminal.print(hexStr);
+        } else {
+          Terminal.print("   ");
+        }
+      }
+
+      // Trenner zwischen Hex und ASCII
+      Terminal.print("| ");
+
+      for (int i = 0; i < geleseneBytes; i++) {
+        uint8_t c = puffer[i];
+        if (c >= 32 && c <= 126) {
+          Terminal.write(c);
+        } else {
+          Terminal.print("."); // Nicht-druckbare Zeichen als Punkt darstellen
+        }
+      }
+      Terminal.println(); // Zeilenumbruch nach 8 Bytes
+
+      // Offset erhöhen und Zeilen für das Blättern zählen
+      offset += geleseneBytes;
+      ausgegebeneZeilen++;
+
+      if (ausgegebeneZeilen >= 20) {
+        if (wait_key(1) == 27) {
+          break;
+        }
+        ausgegebeneZeilen = 0;
+      }
+    }
+
+    datei.close();
+    lua_pushboolean(L, true);
+    return 1;
+  }
+  //---------------------------------------------- sd.listfile() ------------------------------------------------------------
+  // 16. erstellt eine Tabelle der Dateien auf der SD-Karte (REINER DATEINAME)
   int lua_sd_get_file_list(lua_State* L) {
     lua_newtable(L);
     String cleanPath = currentWorkDir;
-    if (cleanPath.length() > 1 && cleanPath.endsWith("/")) { // Wenn der Pfad mit "/" endet, abschneiden
+    if (cleanPath.length() > 1 && cleanPath.endsWith("/")) {                      // Wenn der Pfad mit "/" endet, abschneiden
       cleanPath = cleanPath.substring(0, cleanPath.length() - 1);
     }
 
@@ -2605,10 +2697,8 @@ extern "C" {
       if (letzterSlash != -1) {
         reinerName = roherName.substring(letzterSlash + 1);
       }
-      // =============================================================================
 
-      // ================== 2. SYSTEM-FILTER (Jetzt absolut wasserdicht) =============
-      char ersterBuchstabe = reinerName.length() > 0 ? reinerName[0] : '\0';
+      char ersterBuchstabe = reinerName.length() > 0 ? reinerName[0] : '\0';          //unsichtbare und Systemdateien ausblenden
       if (ersterBuchstabe == '.' || ersterBuchstabe == 'S' || ersterBuchstabe == 's' || ersterBuchstabe == 'F' || ersterBuchstabe == 'f') {
         if (strcasecmp(reinerName.c_str(), "System Volume Information") == 0 ||
             strcasecmp(reinerName.c_str(), "FOUND.000") == 0 ||
@@ -2617,8 +2707,6 @@ extern "C" {
           continue;
         }
       }
-      // ============================================================
-
 
       lua_newtable(L);
       lua_pushstring(L, reinerName.c_str());
@@ -2638,12 +2726,12 @@ extern "C" {
         lua_pushstring(L, sizeBuf);
         lua_rawseti(L, -2, 2);    // Index 2
 
-        lua_pushstring(L, "DATEI");  // Spalte 3: Typ
-        lua_rawseti(L, -2, 3);    // Index 3
+        lua_pushstring(L, "DATEI");   // Spalte 3: Typ
+        lua_rawseti(L, -2, 3);        // Index 3
       }
 
-      // 3. Die fertige Unter-Tabelle (Zeile) in unsere Haupt-Tabelle einfügen
-      lua_rawseti(L, -2, eintragIndex);
+
+      lua_rawseti(L, -2, eintragIndex);                                           // fertige Unter-Tabelle (Zeile) in Haupt-Tabelle einfügen
       eintragIndex++;
       file.close();
     }
@@ -2653,7 +2741,7 @@ extern "C" {
 
 
   //---------------------------------------------- sd.pwd() ------------------------------------------------------------
-  // 16. liest den aktuellen Pfad
+  // 17. liest den aktuellen Pfad
   int lua_sd_pwd(lua_State* L) {
     String cleanPath = currentWorkDir;
     if (cleanPath.length() > 1 && cleanPath.endsWith("/")) {                              // Wenn der Pfad mit "/" endet, abschneiden
@@ -2671,8 +2759,8 @@ extern "C" {
     }
     return -1; // Alle Slots voll
   }
-
-  // 2. Datei öffnen: local fileHandle = sd.open("song.mp3", "r")
+  //---------------------------------------------- sd.open(datei,mode) ------------------------------------------------------------
+  // 18. Datei öffnen: local fileHandle = sd.open("song.mp3", "r")
   int lua_sd_open(lua_State* L) {
     const char* dateiname = luaL_checkstring(L, 1);
     const char* modeStr = luaL_optstring(L, 2, "r"); // "r" für Lesen, "w" für Schreiben
@@ -2705,7 +2793,8 @@ return 1;
       return 1;
     }
 
-    // 3. Bytes aus Datei lesen: local bytesTabelle = sd.read(fileHandle, anzahl_bytes)
+    //---------------------------------------------- sd.read(fileHandle, anzahl_bytes) --------------------------------------
+    // 19. Bytes aus Datei lesen: local bytesTabelle = sd.read(fileHandle, anzahl_bytes)
     int lua_sd_read(lua_State* L) {
       int slot = luaL_checkinteger(L, 1);
       int requestedCount = luaL_checkinteger(L, 2);
@@ -2749,8 +2838,8 @@ return 1;
       return 1;
     }
 
-
-    // 4. Lesezeiger versetzen: sd.seek(fileHandle, absolute_position)
+    //---------------------------------------------- sd.sseek(fileHandle, position) ------------------------------------------------
+    // 20. Lesezeiger versetzen: sd.seek(fileHandle, absolute_position)
     int lua_sd_seek(lua_State* L) {
       int slot = luaL_checkinteger(L, 1);
       uint32_t pos = (uint32_t)luaL_checkinteger(L, 2);
@@ -2762,8 +2851,8 @@ return 1;
       lua_pushboolean(L, success);
       return 1;
     }
-
-    // 5. Datei schließen: sd.close(fileHandle)
+    //---------------------------------------------- sd.close(fileHandle) ------------------------------------------------------
+    // 21. Datei schließen: sd.close(fileHandle)
     int lua_sd_close(lua_State* L) {
       int slot = luaL_checkinteger(L, 1);
       if (slot >= 0 && slot < MAX_OPEN_FILES && openFiles[slot]) {
@@ -2775,7 +2864,8 @@ return 1;
       return 0;
     }
 
-    // 6. Bytes/Text in Datei schreiben: local geschrieben = sd.write(fileHandle, string_oder_tabelle)
+    //---------------------------------------------- sd.write(fileHandle,string_oder_tabelle) ----------------------------------
+    // 22. Bytes/Text in Datei schreiben: local geschrieben = sd.write(fileHandle, string_oder_tabelle)
     int lua_sd_write(lua_State* L) {
       int slot = luaL_checkinteger(L, 1);
       if (slot < 0 || slot >= MAX_OPEN_FILES || !openFiles[slot]) {
@@ -2821,7 +2911,8 @@ return 1;
       return 1;
     }
 
-    // 11. Funktion für sd.readline(dateiname) -> Die gesamte Datei zeilenweise in eine Tabelle laden
+    //---------------------------------------------- sd.readline(Dateiname) ----------------------------------------------
+    // 23. Funktion für sd.readline(dateiname) -> Die gesamte Datei zeilenweise in eine Tabelle laden
     int lua_sd_read_lines(lua_State* L) {
       const char* dateiname = luaL_checkstring(L, 1);
       String Pfad = resolve_lua_path(dateiname);
@@ -2846,10 +2937,10 @@ return 1;
       datei.close();
       return 1;
     }
-    //********************************************** System-Funktionen *****************
-    // ============================================================================
+    //********************************************** System-Funktionen ***********************************
+    // ===================================================================================================
     // SYSTEM INTERFACE (Modul: sys)
-    // ============================================================================
+    // ===================================================================================================
 
     // C++ Funktion für system.millis()
     int lua_sys_timer(lua_State* L) {
@@ -3187,633 +3278,639 @@ return 1;
       }
     }
     //############################################ GPIO Funktionen ####################################################
+#ifdef OLIMEX
+int lua_gpioTest(lua_State* L) {
+// 1. PHASE: Pin 9 (PORTD, Pin 4) exakt wie im C++ Example als Eingang konfigurieren
+Expander.configureUEXT (GPIO_Pin_6, DIRECTION_IN, 1);   // Pull up/down: GPIO4 pulled down (0)
 
-    int lua_gpioTest(lua_State* L) {
-      // 1. PHASE: Pin 9 (PORTD, Pin 4) exakt wie im C++ Example als Eingang konfigurieren
-      Expander.configureUEXT (GPIO_Pin_6, DIRECTION_IN, 1);   // Pull up/down: GPIO4 pulled down (0)
+
+    // Eine kleine Hardware-Atempause für den geteilten SPI-Bus und den Inverter
+    vTaskDelay(pdMS_TO_TICKS(10));
+    yield();
+
+    // 2. PHASE: Den Wert direkt als Ganzzahl (int) auslesen (0, 8, 16 etc.)
+    int raw_value = Expander.readUEXT (GPIO_6);
+
+    // 3. PHASE: Für uns im Seriellen Monitor der Arduino-IDE protokollieren
+    Serial.printf("[C++ GPIO-Test] Roher Register-Wert von PD4: %d\n", raw_value);
+    Serial.flush();
+
+    // Normierung: Jede Zahl größer als 0 wird für Lua zu einer sauberen 1, 0 bleibt 0
+    int final_level = raw_value;//(raw_value > 0) ? 1 : 0;
+
+    // Wert zurück an Lua geben
+    lua_pushinteger(L, final_level);
+    return 1;
+  }
 
 
-      // Eine kleine Hardware-Atempause für den geteilten SPI-Bus und den Inverter
-      vTaskDelay(pdMS_TO_TICKS(10));
-      yield();
 
-      // 2. PHASE: Den Wert direkt als Ganzzahl (int) auslesen (0, 8, 16 etc.)
-      int raw_value = Expander.readUEXT (GPIO_6);
+  //---------------------------------- gpio.config("mode",parameters) ------------------------------------
 
-      // 3. PHASE: Für uns im Seriellen Monitor der Arduino-IDE protokollieren
-      Serial.printf("[C++ GPIO-Test] Roher Register-Wert von PD4: %d\n", raw_value);
-      Serial.flush();
+  int lua_gpioConfig(lua_State* L) {
+    // Wenn der 1. Parameter eine Tabelle ist (z.B. gpio.UEXT_9), ist es ein UEXT-Direktaufruf!
+    if (lua_isnumber(L, 1)) {
+      int uext_pin = luaL_checkinteger(L, 1);
+      int lua_dir  = luaL_checkinteger(L, 2); // 1 = IN, 0 = OUT
+      int lua_pull = luaL_optinteger(L, 3, 0); // 1 = PULL_UP/DOWN, 0 = NONE
 
-      // Normierung: Jede Zahl größer als 0 wird für Lua zu einer sauberen 1, 0 bleibt 0
-      int final_level = raw_value;//(raw_value > 0) ? 1 : 0;
+      uint8_t port = 0;
+      uint8_t pin_mask = 0;
 
-      // Wert zurück an Lua geben
+      // Port und die exakte GPIO_Pin_X Maske laut deiner Liste zuordnen
+      if (uext_pin == 3)  {
+        port = GPIO_PORTD;
+        pin_mask = GPIO_Pin_5;
+      }
+      if (uext_pin == 4)  {
+        port = GPIO_PORTD;
+        pin_mask = GPIO_Pin_6;
+      }
+      if (uext_pin == 5)  {
+        port = GPIO_PORTC;
+        pin_mask = GPIO_Pin_2;
+      }
+      if (uext_pin == 6)  {
+        port = GPIO_PORTC;
+        pin_mask = GPIO_Pin_1;
+      }
+      if (uext_pin == 7)  {
+        port = GPIO_PORTA;
+        pin_mask = GPIO_Pin_2;
+      }
+      if (uext_pin == 8)  {
+        port = GPIO_PORTA;
+        pin_mask = GPIO_Pin_1;
+      }
+      if (uext_pin == 9)  {
+        port = GPIO_PORTD;  // PD4
+        pin_mask = GPIO_Pin_4;
+      }
+      if (uext_pin == 10) {
+        port = GPIO_PORTD;  // PD3
+        pin_mask = GPIO_Pin_3;
+      }
+
+      // Masken exakt nach deinem funktionierenden Example aufbauen:
+      uint8_t mask_pins = pin_mask;
+      uint8_t mask_dirs = (lua_dir == 1) ? pin_mask : 0; // Wenn IN (1), dann Maske setzen
+      uint8_t mask_pull = (lua_pull == 1) ? pin_mask : 0; // Wenn Pull aktiv, Maske setzen
+
+      // Der originale, funktionierende Bibliotheks-Aufruf
+      Expander.configurePort(port, mask_pins, mask_dirs, mask_pull);
+
+      vTaskDelay(pdMS_TO_TICKS(5)); // SPI-Beruhigungspause
+      return 0;
+    }
+    // Altes Subsystem-Auswertung (für "UART", "I2C", "SPI") falls der 1. Parameter ein String ist
+    const char* mode = luaL_checkstring(L, 1);
+    if (strcmp(mode, "UART") == 0) {
+      Expander.configureUART(luaL_checkinteger(L, 2), UART_StopBits_1, UART_Parity_No);
+    } else if (strcmp(mode, "I2C") == 0) {
+      Expander.configureI2C(luaL_checkinteger(L, 2));
+    } else if (strcmp(mode, "SPI") == 0) {
+      Expander.configureSPI(luaL_checkinteger(L, 2), luaL_checkinteger(L, 3));
+    }
+    return 0;
+  }
+  //---------------------------------- gpio.write("mode",parameters) ------------------------------------
+  int lua_gpioWrite(lua_State* L) {
+    // FALL A: Direktes Pin-Objekt (Tabelle wie gpio.UEXT_10) wurde übergeben
+    if (lua_isnumber(L, 1)) {
+      int uext_pin = luaL_checkinteger(L, 1);
+      uint8_t val  = (uint8_t)luaL_checkinteger(L, 2);
+
+      if (uext_pin == 3)  {
+        Expander.setGPIO(GPIO_PORTD, GPIO_5, val);
+      }
+      if (uext_pin == 4)  {
+        Expander.setGPIO(GPIO_PORTD, GPIO_6, val);
+      }
+      if (uext_pin == 5)  {
+        Expander.setGPIO(GPIO_PORTC, GPIO_2, val);
+      }
+      if (uext_pin == 6)  {
+        Expander.setGPIO(GPIO_PORTC, GPIO_1, val);
+      }
+      if (uext_pin == 7)  {
+        Expander.setGPIO(GPIO_PORTA, GPIO_2, val);
+      }
+      if (uext_pin == 8)  {
+        Expander.setGPIO(GPIO_PORTA, GPIO_1, val);
+      }
+      if (uext_pin == 9)  {
+        Expander.setGPIO(GPIO_PORTD, GPIO_4, val);
+      }
+      if (uext_pin == 10) {
+        Expander.setGPIO(GPIO_PORTD, GPIO_3, val);
+      }
+      return 0;
+    }
+
+
+    // FALL B: Ein Text-Ziel (Busse) wurde übergeben
+    const char* target = luaL_checkstring(L, 1);
+
+    // ==========================================
+    //  SUB-SYSTEM: UART
+    // ==========================================
+    if (strcmp(target, "UART") == 0) {
+      if (lua_isstring(L, 2)) {
+        Expander.strWriteUART((char*)lua_tostring(L, 2));
+      } else if (lua_istable(L, 2)) {
+        size_t size = lua_rawlen(L, 2);
+        if (size > 0) {
+          uint8_t* buffer = new uint8_t[size];
+          for (size_t i = 1; i <= size; i++) {
+            lua_rawgeti(L, 2, i);
+            buffer[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
+            lua_pop(L, 1);
+          }
+          Expander.writeUART(buffer, size);
+          delete[] buffer;
+        }
+      }
+      return 0;
+    }
+    // ==========================================
+    //  SUB-SYSTEM: I2C
+    // ==========================================
+    else if (strcmp(target, "I2C") == 0) {
+      uint8_t address = luaL_checkinteger(L, 2);
+      if (lua_isnumber(L, 3) && lua_isnumber(L, 4)) {
+        Expander.writeRegI2C(address, luaL_checkinteger(L, 3), luaL_checkinteger(L, 4));
+      } else if (lua_istable(L, 3)) {
+        size_t size = lua_rawlen(L, 3);
+        if (size > 0) {
+          uint8_t* buffer = new uint8_t[size];
+          for (size_t i = 1; i <= size; i++) {
+            lua_rawgeti(L, 3, i);
+            buffer[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
+            lua_pop(L, 1);
+          }
+          Expander.writeI2C(address, buffer, size);
+          delete[] buffer;
+        }
+      }
+      return 0;
+    }
+    // ==========================================
+    //  SUB-SYSTEM: SPI (Kombiniert Senden/Lesen)
+    // ==========================================
+    else if (strcmp(target, "SPI") == 0) {
+      luaL_checktype(L, 2, LUA_TTABLE);
+      int bitSize = luaL_optinteger(L, 3, 8); // Standard: 8-Bit
+      size_t size = lua_rawlen(L, 2);
+
+      if (size == 0) {
+        lua_newtable(L);
+        return 1;
+      }
+
+      lua_newtable(L); // Rückgabetabelle für Lua vorbereiten
+
+      if (bitSize == 16) {
+        uint16_t* tx = new uint16_t[size];
+        uint16_t* rx = new uint16_t[size];
+        for (size_t i = 1; i <= size; i++) {
+          lua_rawgeti(L, 2, i);
+          tx[i - 1] = (uint16_t)luaL_checkinteger(L, -1);
+          lua_pop(L, 1);
+        }
+        Expander.transferSPI16(tx, rx, (uint8_t)size);
+        for (size_t i = 1; i <= size; i++) {
+          lua_pushinteger(L, rx[i - 1]);
+          lua_rawseti(L, -2, i);
+        }
+        delete[] tx; delete[] rx;
+      } else {
+        uint8_t* tx = new uint8_t[size];
+        uint8_t* rx = new uint8_t[size];
+        for (size_t i = 1; i <= size; i++) {
+          lua_rawgeti(L, 2, i);
+          tx[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
+          lua_pop(L, 1);
+        }
+        Expander.transferSPI8(tx, rx, (uint8_t)size);
+        for (size_t i = 1; i <= size; i++) {
+          lua_pushinteger(L, rx[i - 1]);
+          lua_rawseti(L, -2, i);
+        }
+        delete[] tx; delete[] rx;
+      }
+      return 1; // Gibt empfangene SPI-Daten als Tabelle zurück
+    }
+    else {
+      return luaL_error(L, "Unbekanntes Schreibziel: %s", target);
+    }
+    return 0;
+  }
+
+
+
+  //---------------------------------- gpio.read("mode",parameters) ------------------------------------
+
+  int lua_gpioRead(lua_State* L) {
+    // FALL A: Direktes Pin-Objekt (Tabelle wie gpio.UEXT_9) wurde übergeben
+    if (lua_isnumber(L, 1)) {
+      int uext_pin = luaL_checkinteger(L, 1);
+
+      // 1. WICHTIG: Datentyp von 'bool' auf 'int' oder 'uint8_t' ändern!
+      int raw_value = 0;
+
+      vTaskDelay(pdMS_TO_TICKS(1));
+
+      // 2. Nutze hier wieder deine auskommentierte Pin-Liste (jetzt mit raw_value)
+      if (uext_pin == 3)  {
+        raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_5);
+      }
+      if (uext_pin == 4)  {
+        raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_6);
+      }
+      if (uext_pin == 5)  {
+        raw_value = Expander.getPort(GPIO_PORTC, GPIO_Pin_2);
+      }
+      if (uext_pin == 6)  {
+        raw_value = Expander.getPort(GPIO_PORTC, GPIO_Pin_1);
+      }
+      if (uext_pin == 7)  {
+        raw_value = Expander.getPort(GPIO_PORTA, GPIO_Pin_2);
+      }
+      if (uext_pin == 8)  {
+        raw_value = Expander.getPort(GPIO_PORTA, GPIO_Pin_1);
+      }
+      if (uext_pin == 9)  {
+        raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_4);  // PD4 -> Liefert 16
+      }
+      if (uext_pin == 10) {
+        raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_3);  // PD3 -> Liefert 8
+      }
+
+      // 3. Normierung: !! verwandelt 16 oder 8 in eine 1. 0 bleibt 0.
+      int final_level = !!raw_value;
+
+      // 4. Den sauberen, normierten Wert (0 oder 1) an Lua übergeben
       lua_pushinteger(L, final_level);
       return 1;
     }
 
-
-
-    //---------------------------------- gpio.config("mode",parameters) ------------------------------------
-
-    int lua_gpioConfig(lua_State* L) {
-      // Wenn der 1. Parameter eine Tabelle ist (z.B. gpio.UEXT_9), ist es ein UEXT-Direktaufruf!
-      if (lua_isnumber(L, 1)) {
-        int uext_pin = luaL_checkinteger(L, 1);
-        int lua_dir  = luaL_checkinteger(L, 2); // 1 = IN, 0 = OUT
-        int lua_pull = luaL_optinteger(L, 3, 0); // 1 = PULL_UP/DOWN, 0 = NONE
-
-        uint8_t port = 0;
-        uint8_t pin_mask = 0;
-
-        // Port und die exakte GPIO_Pin_X Maske laut deiner Liste zuordnen
-        if (uext_pin == 3)  {
-          port = GPIO_PORTD;
-          pin_mask = GPIO_Pin_5;
-        }
-        if (uext_pin == 4)  {
-          port = GPIO_PORTD;
-          pin_mask = GPIO_Pin_6;
-        }
-        if (uext_pin == 5)  {
-          port = GPIO_PORTC;
-          pin_mask = GPIO_Pin_2;
-        }
-        if (uext_pin == 6)  {
-          port = GPIO_PORTC;
-          pin_mask = GPIO_Pin_1;
-        }
-        if (uext_pin == 7)  {
-          port = GPIO_PORTA;
-          pin_mask = GPIO_Pin_2;
-        }
-        if (uext_pin == 8)  {
-          port = GPIO_PORTA;
-          pin_mask = GPIO_Pin_1;
-        }
-        if (uext_pin == 9)  {
-          port = GPIO_PORTD;  // PD4
-          pin_mask = GPIO_Pin_4;
-        }
-        if (uext_pin == 10) {
-          port = GPIO_PORTD;  // PD3
-          pin_mask = GPIO_Pin_3;
-        }
-
-        // Masken exakt nach deinem funktionierenden Example aufbauen:
-        uint8_t mask_pins = pin_mask;
-        uint8_t mask_dirs = (lua_dir == 1) ? pin_mask : 0; // Wenn IN (1), dann Maske setzen
-        uint8_t mask_pull = (lua_pull == 1) ? pin_mask : 0; // Wenn Pull aktiv, Maske setzen
-
-        // Der originale, funktionierende Bibliotheks-Aufruf
-        Expander.configurePort(port, mask_pins, mask_dirs, mask_pull);
-
-        vTaskDelay(pdMS_TO_TICKS(5)); // SPI-Beruhigungspause
-        return 0;
-      }
-      // Altes Subsystem-Auswertung (für "UART", "I2C", "SPI") falls der 1. Parameter ein String ist
-      const char* mode = luaL_checkstring(L, 1);
-      if (strcmp(mode, "UART") == 0) {
-        Expander.configureUART(luaL_checkinteger(L, 2), UART_StopBits_1, UART_Parity_No);
-      } else if (strcmp(mode, "I2C") == 0) {
-        Expander.configureI2C(luaL_checkinteger(L, 2));
-      } else if (strcmp(mode, "SPI") == 0) {
-        Expander.configureSPI(luaL_checkinteger(L, 2), luaL_checkinteger(L, 3));
-      }
-      return 0;
-    }
-    //---------------------------------- gpio.write("mode",parameters) ------------------------------------
-    int lua_gpioWrite(lua_State* L) {
-      // FALL A: Direktes Pin-Objekt (Tabelle wie gpio.UEXT_10) wurde übergeben
-      if (lua_isnumber(L, 1)) {
-        int uext_pin = luaL_checkinteger(L, 1);
-        uint8_t val  = (uint8_t)luaL_checkinteger(L, 2);
-
-        if (uext_pin == 3)  {
-          Expander.setGPIO(GPIO_PORTD, GPIO_5, val);
-        }
-        if (uext_pin == 4)  {
-          Expander.setGPIO(GPIO_PORTD, GPIO_6, val);
-        }
-        if (uext_pin == 5)  {
-          Expander.setGPIO(GPIO_PORTC, GPIO_2, val);
-        }
-        if (uext_pin == 6)  {
-          Expander.setGPIO(GPIO_PORTC, GPIO_1, val);
-        }
-        if (uext_pin == 7)  {
-          Expander.setGPIO(GPIO_PORTA, GPIO_2, val);
-        }
-        if (uext_pin == 8)  {
-          Expander.setGPIO(GPIO_PORTA, GPIO_1, val);
-        }
-        if (uext_pin == 9)  {
-          Expander.setGPIO(GPIO_PORTD, GPIO_4, val);
-        }
-        if (uext_pin == 10) {
-          Expander.setGPIO(GPIO_PORTD, GPIO_3, val);
-        }
-        return 0;
-      }
-
-
-      // FALL B: Ein Text-Ziel (Busse) wurde übergeben
-      const char* target = luaL_checkstring(L, 1);
-
-      // ==========================================
-      //  SUB-SYSTEM: UART
-      // ==========================================
-      if (strcmp(target, "UART") == 0) {
-        if (lua_isstring(L, 2)) {
-          Expander.strWriteUART((char*)lua_tostring(L, 2));
-        } else if (lua_istable(L, 2)) {
-          size_t size = lua_rawlen(L, 2);
-          if (size > 0) {
-            uint8_t* buffer = new uint8_t[size];
-            for (size_t i = 1; i <= size; i++) {
-              lua_rawgeti(L, 2, i);
-              buffer[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
-              lua_pop(L, 1);
-            }
-            Expander.writeUART(buffer, size);
-            delete[] buffer;
-          }
-        }
-        return 0;
-      }
-      // ==========================================
-      //  SUB-SYSTEM: I2C
-      // ==========================================
-      else if (strcmp(target, "I2C") == 0) {
-        uint8_t address = luaL_checkinteger(L, 2);
-        if (lua_isnumber(L, 3) && lua_isnumber(L, 4)) {
-          Expander.writeRegI2C(address, luaL_checkinteger(L, 3), luaL_checkinteger(L, 4));
-        } else if (lua_istable(L, 3)) {
-          size_t size = lua_rawlen(L, 3);
-          if (size > 0) {
-            uint8_t* buffer = new uint8_t[size];
-            for (size_t i = 1; i <= size; i++) {
-              lua_rawgeti(L, 3, i);
-              buffer[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
-              lua_pop(L, 1);
-            }
-            Expander.writeI2C(address, buffer, size);
-            delete[] buffer;
-          }
-        }
-        return 0;
-      }
-      // ==========================================
-      //  SUB-SYSTEM: SPI (Kombiniert Senden/Lesen)
-      // ==========================================
-      else if (strcmp(target, "SPI") == 0) {
-        luaL_checktype(L, 2, LUA_TTABLE);
-        int bitSize = luaL_optinteger(L, 3, 8); // Standard: 8-Bit
-        size_t size = lua_rawlen(L, 2);
-
-        if (size == 0) {
-          lua_newtable(L);
-          return 1;
-        }
-
-        lua_newtable(L); // Rückgabetabelle für Lua vorbereiten
-
-        if (bitSize == 16) {
-          uint16_t* tx = new uint16_t[size];
-          uint16_t* rx = new uint16_t[size];
-          for (size_t i = 1; i <= size; i++) {
-            lua_rawgeti(L, 2, i);
-            tx[i - 1] = (uint16_t)luaL_checkinteger(L, -1);
-            lua_pop(L, 1);
-          }
-          Expander.transferSPI16(tx, rx, (uint8_t)size);
-          for (size_t i = 1; i <= size; i++) {
-            lua_pushinteger(L, rx[i - 1]);
-            lua_rawseti(L, -2, i);
-          }
-          delete[] tx; delete[] rx;
-        } else {
-          uint8_t* tx = new uint8_t[size];
-          uint8_t* rx = new uint8_t[size];
-          for (size_t i = 1; i <= size; i++) {
-            lua_rawgeti(L, 2, i);
-            tx[i - 1] = (uint8_t)luaL_checkinteger(L, -1);
-            lua_pop(L, 1);
-          }
-          Expander.transferSPI8(tx, rx, (uint8_t)size);
-          for (size_t i = 1; i <= size; i++) {
-            lua_pushinteger(L, rx[i - 1]);
-            lua_rawseti(L, -2, i);
-          }
-          delete[] tx; delete[] rx;
-        }
-        return 1; // Gibt empfangene SPI-Daten als Tabelle zurück
-      }
-      else {
-        return luaL_error(L, "Unbekanntes Schreibziel: %s", target);
-      }
-      return 0;
-    }
-
-
-
-    //---------------------------------- gpio.read("mode",parameters) ------------------------------------
-
-
-
-
-
-    int lua_gpioRead(lua_State* L) {
-      // FALL A: Direktes Pin-Objekt (Tabelle wie gpio.UEXT_9) wurde übergeben
-      if (lua_isnumber(L, 1)) {
-        int uext_pin = luaL_checkinteger(L, 1);
-
-        // 1. WICHTIG: Datentyp von 'bool' auf 'int' oder 'uint8_t' ändern!
-        int raw_value = 0;
-
-        vTaskDelay(pdMS_TO_TICKS(1));
-
-        // 2. Nutze hier wieder deine auskommentierte Pin-Liste (jetzt mit raw_value)
-        if (uext_pin == 3)  {
-          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_5);
-        }
-        if (uext_pin == 4)  {
-          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_6);
-        }
-        if (uext_pin == 5)  {
-          raw_value = Expander.getPort(GPIO_PORTC, GPIO_Pin_2);
-        }
-        if (uext_pin == 6)  {
-          raw_value = Expander.getPort(GPIO_PORTC, GPIO_Pin_1);
-        }
-        if (uext_pin == 7)  {
-          raw_value = Expander.getPort(GPIO_PORTA, GPIO_Pin_2);
-        }
-        if (uext_pin == 8)  {
-          raw_value = Expander.getPort(GPIO_PORTA, GPIO_Pin_1);
-        }
-        if (uext_pin == 9)  {
-          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_4);  // PD4 -> Liefert 16
-        }
-        if (uext_pin == 10) {
-          raw_value = Expander.getPort(GPIO_PORTD, GPIO_Pin_3);  // PD3 -> Liefert 8
-        }
-
-        // 3. Normierung: !! verwandelt 16 oder 8 in eine 1. 0 bleibt 0.
-        int final_level = !!raw_value;
-
-        // 4. Den sauberen, normierten Wert (0 oder 1) an Lua übergeben
-        lua_pushinteger(L, final_level);
+    // FALL B: Ein Text-Ziel (Busse) wurde übergeben
+    const char* target = luaL_checkstring(L, 1);
+    if (strcmp(target, "I2C") == 0) {
+      uint8_t address = luaL_checkinteger(L, 2);
+      if (lua_gettop(L) >= 3) {
+        uint8_t val = Expander.readRegI2C(address, luaL_checkinteger(L, 3));
+        lua_pushinteger(L, val);
         return 1;
       }
-
-      // FALL B: Ein Text-Ziel (Busse) wurde übergeben
-      const char* target = luaL_checkstring(L, 1);
-      if (strcmp(target, "I2C") == 0) {
-        uint8_t address = luaL_checkinteger(L, 2);
-        if (lua_gettop(L) >= 3) {
-          uint8_t val = Expander.readRegI2C(address, luaL_checkinteger(L, 3));
-          lua_pushinteger(L, val);
-          return 1;
-        }
-      }
-      // === NEU: SUB-SYSTEM BATTERIE ===
-      else if (strcmp(target, "BATTERY") == 0) {
-        // Holt die Spannung in Millivolt (z.B. 3820)
-        uint16_t mv = Expander.batterySense();
-        // Umwandlung in eine Fließkommazahl in Volt (z.B. 3.82)
-        float voltage = (float)mv / 1000.0f;
-        // Übergibt die Gleitkommazahl sicher an Lua
-        lua_pushnumber(L, voltage);
-        return 1; // 1 Rückgabewert an Lua
-      }
+    }
+    // === NEU: SUB-SYSTEM BATTERIE ===
+    else if (strcmp(target, "BATTERY") == 0) {
+      // Holt die Spannung in Millivolt (z.B. 3820)
+      uint16_t mv = Expander.batterySense();
+      // Umwandlung in eine Fließkommazahl in Volt (z.B. 3.82)
+      float voltage = (float)mv / 1000.0f;
+      // Übergibt die Gleitkommazahl sicher an Lua
+      lua_pushnumber(L, voltage);
+      return 1; // 1 Rückgabewert an Lua
+    }
 
 
-      else if (strcmp(target, "UART") == 0) {
-        uint8_t size = luaL_checkinteger(L, 2);
-        if (size == 0) {
-          lua_newtable(L);
-          return 1;
-        }
-        uint8_t* buffer = new uint8_t[size];
-        uint8_t bytesRead = Expander.readUART(buffer, size);
+    else if (strcmp(target, "UART") == 0) {
+      uint8_t size = luaL_checkinteger(L, 2);
+      if (size == 0) {
         lua_newtable(L);
-        for (size_t i = 1; i <= bytesRead; i++) {
-          lua_pushinteger(L, buffer[i - 1]);
-          lua_rawseti(L, -2, i);
-        }
-        delete[] buffer;
         return 1;
       }
-      return 0;
+      uint8_t* buffer = new uint8_t[size];
+      uint8_t bytesRead = Expander.readUART(buffer, size);
+      lua_newtable(L);
+      for (size_t i = 1; i <= bytesRead; i++) {
+        lua_pushinteger(L, buffer[i - 1]);
+        lua_rawseti(L, -2, i);
+      }
+      delete[] buffer;
+      return 1;
     }
+    return 0;
+  }
+
+#endif //#ifdef OLIMEX
+//############################################ LUA-Task - Hauptschleife #################################################
+void luaComputerTask(void * parameter) {
+bool ln = true;
+int c;
+//L = luaL_newstate();
 
 
-    //############################################ LUA-Task - Hauptschleife #################################################
-    void luaComputerTask(void * parameter) {
-      bool ln = true;
-      int c;
-      //L = luaL_newstate();
+  lua_State *L = lua_newstate(lua_psram_allocator, nullptr, 0);
+  if (L == nullptr) {
+    Terminal.println("CRITICAL ERROR: Lua konnte nicht im PSRAM gestartet werden!");
+    vTaskDelete(nullptr);
+  }
+  //-------------------------------- Lua-Registrierungen ----------------------------
+  //-------------------------------- Lua Standard-Libs ------------------------------
+  luaL_requiref(L, "_G", luaopen_base, 1);      // Basis-Funktionen (assert, type, print, etc.)
+  lua_pop(L, 1);
+  luaL_requiref(L, "math", luaopen_math, 1);    // Mathematische Funktionen (sin, cos, random...)
+  lua_pop(L, 1);
+  luaL_requiref(L, "string", luaopen_string, 1);// String-Manipulationen
+  lua_pop(L, 1);
+  luaL_requiref(L, "table", luaopen_table, 1);  // Tabellen-Funktionen (insert, remove...)
+  lua_pop(L, 1);
+  luaL_requiref(L, "package", luaopen_package, 1); // Aktiviert require() und package
+  lua_pop(L, 1);
+  //-------------------------------- Lua globale Funktionen -------------------------
+  lua_register(L, "print",    lua_custom_print);      //Ausgabe mit Zeilenumbruch
+  lua_register(L, "write",    lua_custom_write);      //Ausgabe ohne Zeilenumbruch
+  lua_register(L, "delay",    lua_delay);             //ms delay
+  lua_register(L, "delayus",  lua_delay_us);          //us delay
+  lua_register(L, "inkey",    lua_global_inkey);      //letzter Tastencode
+  lua_register(L, "waitkey",  lua_global_waitkey);    //Tasteneingabe abwarten
+  lua_register(L, "edit",     lua_cmd_edit);          //Fullscreen-Editor
+  lua_register(L, "run",      lua_dofile);            //Lua-Skript ausführen
+  lua_register(L, "sound",    lua_sound);             //Sound-Funktion
+  lua_register(L, "info",     lua_info);              //Speicher-Informationen
 
+  //-------------------------------- Lua vga-Funktionen -----------------------------
+  lua_newtable(L);
+  lua_pushcfunction(L, lua_vga_color);         lua_setfield(L, -2, "color");
+  lua_pushcfunction(L, lua_vga_pset);          lua_setfield(L, -2, "pset");
+  lua_pushcfunction(L, lua_vga_line);          lua_setfield(L, -2, "line");
+  lua_pushcfunction(L, lua_vga_rect);          lua_setfield(L, -2, "rect");
+  lua_pushcfunction(L, lua_vga_box);           lua_setfield(L, -2, "box");
+  lua_pushcfunction(L, lua_vga_ellipse);       lua_setfield(L, -2, "ellipse");
+  lua_pushcfunction(L, lua_vga_filledellipse); lua_setfield(L, -2, "fillellipse");
+  lua_pushcfunction(L, lua_vga_text);          lua_setfield(L, -2, "text");
+  lua_pushcfunction(L, lua_vga_cls);           lua_setfield(L, -2, "cls");
+  lua_pushcfunction(L, lua_vga_pos);           lua_setfield(L, -2, "pos");
+  lua_pushcfunction(L, lua_vga_get_colors);    lua_setfield(L, -2, "gcolor");
+  lua_pushcfunction(L, lua_vga_wait_vsync);    lua_setfield(L, -2, "waitsync");
+  lua_pushcfunction(L, lua_vga_set_title);     lua_setfield(L, -2, "setTitle");
+  lua_pushcfunction(L, lua_vga_set_status);    lua_setfield(L, -2, "setStatus");
+  lua_pushcfunction(L, lua_vga_close_window);  lua_setfield(L, -2, "closeWindow");
+  lua_pushcfunction(L, lua_vga_open_window);   lua_setfield(L, -2, "openWindow");
+  lua_pushcfunction(L, lua_vga_update_window); lua_setfield(L, -2, "updateWindow");
+  lua_pushcfunction(L, lua_vga_cursor_onoff);  lua_setfield(L, -2, "cursor");
+  lua_pushcfunction(L, lua_vga_bmpload);       lua_setfield(L, -2, "bmpLoad");
+  lua_pushcfunction(L, lua_vga_bmpsave);       lua_setfield(L, -2, "bmpSave");
+  lua_pushcfunction(L, lua_vga_swap);          lua_setfield(L, -2, "swap");
+  lua_setglobal(L, "vga");        // Die Tabelle "vga" registrieren
+  //-------------------------------- Lua sys-Funktionen -----------------------------
+  lua_newtable(L);
+  lua_pushcfunction(L, lua_sys_timer);         lua_setfield(L, -2, "timer");
+  lua_pushcfunction(L, lua_sys_load);          lua_setfield(L, -2, "load");
+  lua_pushcfunction(L, sys_get_time);          lua_setfield(L, -2, "gettime");
+  lua_pushcfunction(L, sys_get_date);          lua_setfield(L, -2, "getdate");
+  lua_pushcfunction(L, lua_sys_flash);         lua_setfield(L, -2, "flash");
+  lua_setglobal(L, "sys");
+  //-------------------------------- Lua sd-Funktionen ------------------------------
+  // Eine neue Tabelle für die SD-Bibliothek in Lua erstellen
+  lua_newtable(L);
+  lua_pushcfunction(L, lua_sd_ls);     lua_setfield(L, -2, "ls");
+  lua_pushcfunction(L, lua_sd_remove); lua_setfield(L, -2, "remove");
+  lua_pushcfunction(L, lua_sd_mkdir);  lua_setfield(L, -2, "mkdir");
+  lua_pushcfunction(L, lua_sd_rmdir);  lua_setfield(L, -2, "rmdir");
+  lua_pushcfunction(L, lua_sd_cd);     lua_setfield(L, -2, "cd");
+  lua_pushcfunction(L, lua_sd_copy);   lua_setfield(L, -2, "copy");
+  lua_pushcfunction(L, lua_sd_rename); lua_setfield(L, -2, "rename");
+  lua_pushcfunction(L, lua_sd_exists); lua_setfield(L, -2, "exist");
+  lua_pushcfunction(L, lua_sd_write);  lua_setfield(L, -2, "write");
+  lua_pushcfunction(L, lua_sd_read_lines); lua_setfield(L, -2, "readline");
+  lua_pushcfunction(L, lua_sd_mount);   lua_setfield(L, -2, "mount");
+  lua_pushcfunction(L, lua_sd_unmount); lua_setfield(L, -2, "unmount");
+  lua_pushcfunction(L, lua_sd_cat);     lua_setfield(L, -2, "cat");
+  lua_pushcfunction(L, lua_sd_get_file_list); lua_setfield(L, -2, "listfile");
+  lua_pushcfunction(L, lua_sd_pwd);     lua_setfield(L, -2, "pwd");
+  lua_pushcfunction(L, lua_sd_open);    lua_setfield(L, -2, "open");
+  lua_pushcfunction(L, lua_sd_read);    lua_setfield(L, -2, "read");
+  lua_pushcfunction(L, lua_sd_seek);    lua_setfield(L, -2, "seek");
+  lua_pushcfunction(L, lua_sd_close);   lua_setfield(L, -2, "close");
+  lua_pushcfunction(L, lua_sd_hexmon);   lua_setfield(L, -2, "hexmon");
 
-      lua_State *L = lua_newstate(lua_psram_allocator, nullptr, 0);
-      if (L == nullptr) {
-        Terminal.println("CRITICAL ERROR: Lua konnte nicht im PSRAM gestartet werden!");
-        vTaskDelete(nullptr);
-      }
-      //-------------------------------- Lua-Registrierungen ----------------------------
-      //-------------------------------- Lua Standard-Libs ------------------------------
-      luaL_requiref(L, "_G", luaopen_base, 1);      // Basis-Funktionen (assert, type, print, etc.)
-      lua_pop(L, 1);
-      luaL_requiref(L, "math", luaopen_math, 1);    // Mathematische Funktionen (sin, cos, random...)
-      lua_pop(L, 1);
-      luaL_requiref(L, "string", luaopen_string, 1);// String-Manipulationen
-      lua_pop(L, 1);
-      luaL_requiref(L, "table", luaopen_table, 1);  // Tabellen-Funktionen (insert, remove...)
-      lua_pop(L, 1);
-      luaL_requiref(L, "package", luaopen_package, 1); // Aktiviert require() und package
-      lua_pop(L, 1);
-      //-------------------------------- Lua globale Funktionen -------------------------
-      lua_register(L, "print",    lua_custom_print);      //Ausgabe mit Zeilenumbruch
-      lua_register(L, "write",    lua_custom_write);      //Ausgabe ohne Zeilenumbruch
-      lua_register(L, "delay",    lua_delay);             //ms delay
-      lua_register(L, "delayus",  lua_delay_us);          //us delay
-      lua_register(L, "inkey",    lua_global_inkey);      //letzter Tastencode
-      lua_register(L, "waitkey",  lua_global_waitkey);    //Tasteneingabe abwarten
-      lua_register(L, "edit",     lua_cmd_edit);          //Fullscreen-Editor
-      lua_register(L, "run",      lua_dofile);            //Lua-Skript ausführen
-      lua_register(L, "sound",    lua_sound);             //Sound-Funktion
-      lua_register(L, "info",     lua_info);              //Speicher-Informationen
-      //-------------------------------- Lua vga-Funktionen -----------------------------
-      lua_newtable(L);
-      lua_pushcfunction(L, lua_vga_color);         lua_setfield(L, -2, "color");
-      lua_pushcfunction(L, lua_vga_pset);          lua_setfield(L, -2, "pset");
-      lua_pushcfunction(L, lua_vga_line);          lua_setfield(L, -2, "line");
-      lua_pushcfunction(L, lua_vga_rect);          lua_setfield(L, -2, "rect");
-      lua_pushcfunction(L, lua_vga_box);           lua_setfield(L, -2, "box");
-      lua_pushcfunction(L, lua_vga_ellipse);       lua_setfield(L, -2, "ellipse");
-      lua_pushcfunction(L, lua_vga_filledellipse); lua_setfield(L, -2, "fillellipse");
-      lua_pushcfunction(L, lua_vga_text);          lua_setfield(L, -2, "text");
-      lua_pushcfunction(L, lua_vga_cls);           lua_setfield(L, -2, "cls");
-      lua_pushcfunction(L, lua_vga_pos);           lua_setfield(L, -2, "pos");
-      lua_pushcfunction(L, lua_vga_get_colors);    lua_setfield(L, -2, "gcolor");
-      lua_pushcfunction(L, lua_vga_wait_vsync);    lua_setfield(L, -2, "waitsync");
-      lua_pushcfunction(L, lua_vga_set_title);     lua_setfield(L, -2, "setTitle");
-      lua_pushcfunction(L, lua_vga_set_status);    lua_setfield(L, -2, "setStatus");
-      lua_pushcfunction(L, lua_vga_close_window);  lua_setfield(L, -2, "closeWindow");
-      lua_pushcfunction(L, lua_vga_open_window);   lua_setfield(L, -2, "openWindow");
-      lua_pushcfunction(L, lua_vga_update_window); lua_setfield(L, -2, "updateWindow");
-      lua_pushcfunction(L, lua_vga_cursor_onoff);  lua_setfield(L, -2, "cursor");
-      lua_pushcfunction(L, lua_vga_bmpload);       lua_setfield(L, -2, "bmpLoad");
-      lua_pushcfunction(L, lua_vga_bmpsave);       lua_setfield(L, -2, "bmpSave");
-      lua_pushcfunction(L, lua_vga_swap);          lua_setfield(L, -2, "swap");
-      lua_setglobal(L, "vga");        // Die Tabelle "vga" registrieren
-      //-------------------------------- Lua sys-Funktionen -----------------------------
-      lua_newtable(L);
-      lua_pushcfunction(L, lua_sys_timer);         lua_setfield(L, -2, "timer");
-      lua_pushcfunction(L, lua_sys_load);          lua_setfield(L, -2, "load");
-      lua_pushcfunction(L, sys_get_time);          lua_setfield(L, -2, "gettime");
-      lua_pushcfunction(L, sys_get_date);          lua_setfield(L, -2, "getdate");
-      lua_pushcfunction(L, lua_sys_flash);         lua_setfield(L, -2, "flash");
-      lua_setglobal(L, "sys");
-      //-------------------------------- Lua sd-Funktionen ------------------------------
-      // Eine neue Tabelle für die SD-Bibliothek in Lua erstellen
-      lua_newtable(L);
-      lua_pushcfunction(L, lua_sd_ls);     lua_setfield(L, -2, "ls");
-      lua_pushcfunction(L, lua_sd_remove); lua_setfield(L, -2, "remove");
-      lua_pushcfunction(L, lua_sd_mkdir);  lua_setfield(L, -2, "mkdir");
-      lua_pushcfunction(L, lua_sd_rmdir);  lua_setfield(L, -2, "rmdir");
-      lua_pushcfunction(L, lua_sd_cd);     lua_setfield(L, -2, "cd");
-      lua_pushcfunction(L, lua_sd_copy);   lua_setfield(L, -2, "copy");
-      lua_pushcfunction(L, lua_sd_rename); lua_setfield(L, -2, "rename");
-      lua_pushcfunction(L, lua_sd_exists); lua_setfield(L, -2, "exist");
-      lua_pushcfunction(L, lua_sd_write);  lua_setfield(L, -2, "write");
-      lua_pushcfunction(L, lua_sd_read_lines); lua_setfield(L, -2, "readline");
-      lua_pushcfunction(L, lua_sd_mount);   lua_setfield(L, -2, "mount");
-      lua_pushcfunction(L, lua_sd_unmount); lua_setfield(L, -2, "unmount");
-      lua_pushcfunction(L, lua_sd_cat);     lua_setfield(L, -2, "cat");
-      lua_pushcfunction(L, lua_sd_get_file_list); lua_setfield(L, -2, "listfile");
-      lua_pushcfunction(L, lua_sd_pwd);     lua_setfield(L, -2, "pwd");
-      lua_pushcfunction(L, lua_sd_open);    lua_setfield(L, -2, "open");
-      lua_pushcfunction(L, lua_sd_read);    lua_setfield(L, -2, "read");
-      lua_pushcfunction(L, lua_sd_seek);    lua_setfield(L, -2, "seek");
-      lua_pushcfunction(L, lua_sd_close);   lua_setfield(L, -2, "close");
-      lua_setglobal(L, "sd");         // Die Tabelle global unter dem Namen "sd" registrieren
-      //---------------------------------------------------------------------------------
+  lua_setglobal(L, "sd");         // Die Tabelle global unter dem Namen "sd" registrieren
 
-      //-------------------------------- Lua gpio-Funktionen ----------------------------
-      lua_newtable(L);
-      int tableIndex = lua_gettop(L);
+  //---------------------------------------------------------------------------------
 
-      lua_pushcfunction(L, lua_gpioConfig);     lua_setfield(L, tableIndex, "config");
-      lua_pushcfunction(L, lua_gpioWrite);      lua_setfield(L, tableIndex, "write");
-      lua_pushcfunction(L, lua_gpioRead);       lua_setfield(L, tableIndex, "read");
-      lua_pushcfunction(L, lua_gpioTest);       lua_setfield(L, tableIndex, "test");
+  //-------------------------------- Lua gpio-Funktionen ----------------------------
+#ifdef OLIMEX
+lua_newtable(L);
+int tableIndex = lua_gettop(L);
 
-      lua_pushinteger(L, (int)DIRECTION_IN);    lua_setfield(L, tableIndex, "IN");
-      lua_pushinteger(L, (int)DIRECTION_OUT);   lua_setfield(L, tableIndex, "OUT");
+  lua_pushcfunction(L, lua_gpioConfig);     lua_setfield(L, tableIndex, "config");
+  lua_pushcfunction(L, lua_gpioWrite);      lua_setfield(L, tableIndex, "write");
+  lua_pushcfunction(L, lua_gpioRead);       lua_setfield(L, tableIndex, "read");
+  lua_pushcfunction(L, lua_gpioTest);       lua_setfield(L, tableIndex, "test");
 
-      lua_setglobal(L, "gpio");
+  lua_pushinteger(L, (int)DIRECTION_IN);    lua_setfield(L, tableIndex, "IN");
+  lua_pushinteger(L, (int)DIRECTION_OUT);   lua_setfield(L, tableIndex, "OUT");
 
-      //---------------------------------------------------------------------------------
+  lua_setglobal(L, "gpio");
+#endif
+//---------------------------------------------------------------------------------
 
-      // ========================================================================
-      // AUTOMATISCHER START: init.lua von SD-Karte laden und ausführen
-      // ========================================================================
-      if (SD.exists("/lua/init.lua")) {
-        File bootFile = SD.open("/lua/init.lua", FILE_READ);
-        if (bootFile) {
-          size_t fileSize = bootFile.size();
+  // ========================================================================
+  // AUTOMATISCHER START: init.lua von SD-Karte laden und ausführen
+  // ========================================================================
+  if (SD.exists("/lua/init.lua")) {
+    File bootFile = SD.open("/lua/init.lua", FILE_READ);
+    if (bootFile) {
+      size_t fileSize = bootFile.size();
 
-          char* bootBuffer = (char*)malloc(fileSize + 1);         // Dynamischen temporären Speicher im RAM1 für den Boot-Text anfordern
-          if (bootBuffer != NULL) {
-            bootFile.readBytes(bootBuffer, fileSize);
-            bootBuffer[fileSize] = '\0';
-            bootFile.close();
+      char* bootBuffer = (char*)malloc(fileSize + 1);         // Dynamischen temporären Speicher im RAM1 für den Boot-Text anfordern
+      if (bootBuffer != NULL) {
+        bootFile.readBytes(bootBuffer, fileSize);
+        bootBuffer[fileSize] = '\0';
+        bootFile.close();
 
-            if (luaL_dostring(L, bootBuffer) != LUA_OK) {         // Übergabe des geladenen Text-Strings an den Lua-Kern
-              const char* error_msg = lua_tostring(L, -1);
-              Terminal.print("Fehler in init.lua: ");
-              Terminal.println(error_msg);
-              lua_pop(L, 1);
-            }
-            free(bootBuffer);                                     // Speicher wieder freigeben
-          } else {
-            Terminal.println("Fehler: Zu wenig RAM fuer Boot-Puffer!\n\r");
-            bootFile.close();
-          }
-        } else {
-          Terminal.println("Fehler: Konnte init.lua nicht oeffnen!\n\r");
-        }
-      }
-      Terminal.print("> ");                                         //Eingabeprompt
-      Terminal.enableCursor(Cursor);
-
-      while (true) {
-        while (ln) {
-          c = inchar();
-          switch (c) {
-            case 13:
-              inputBuffer += '\0';
-              Terminal.println();
-              ln = false;
-              break;
-            case 127:
-              if (inputBuffer.length() > 0) {
-                inputBuffer.remove(inputBuffer.length() - 1);
-                Terminal.write("\b\e[K");
-              }
-              break;
-            case KEY_ESC:
-              ln = false;
-              break;
-            case KEY_F1:
-              inputBuffer = "run(\"file.lua\")\n";
-              ln = false;
-              break;
-            case KEY_F2:
-              inputBuffer = String("edit(\"") + currentEditingFilename + "\")\n";
-              currentEditingFilename = nullptr;
-              ln = false;
-              break;
-            case KEY_F3:
-              inputBuffer = String("run(\"") + currentEditingFilename + "\")\n";
-              currentEditingFilename = nullptr;
-              ln = false;
-              break;
-            case KEY_F4:
-              inputBuffer = "info()\n";
-              ln = false;
-              break;
-            default:
-              inputBuffer += (char)c;
-              Terminal.write(c);
-              break;
-          }
-        }
-
-        int status = luaL_dostring(L, inputBuffer.c_str());//line);
-        inputBuffer = "";
-        if (status != LUA_OK) {
-          const char* errorMsg = lua_tostring(L, -1);
-          Terminal.printf("Fehler: %s\n", errorMsg);
+        if (luaL_dostring(L, bootBuffer) != LUA_OK) {         // Übergabe des geladenen Text-Strings an den Lua-Kern
+          const char* error_msg = lua_tostring(L, -1);
+          Terminal.print("Fehler in init.lua: ");
+          Terminal.println(error_msg);
           lua_pop(L, 1);
         }
-        Terminal.println();
-        Terminal.print("> ");
-        ln = true;
+        free(bootBuffer);                                     // Speicher wieder freigeben
+      } else {
+        Terminal.println("Fehler: Zu wenig RAM fuer Boot-Puffer!\n\r");
+        bootFile.close();
       }
-      vTaskDelay(pdMS_TO_TICKS(10));
+    } else {
+      Terminal.println("Fehler: Konnte init.lua nicht oeffnen!\n\r");
     }
+  }
+  Terminal.print("> ");                                         //Eingabeprompt
+  Terminal.enableCursor(Cursor);
 
-    //######################################################## SETUP #######################################################
-    void setup() {
-      Serial.begin(9600);                                                     // serielle Schnittstelle für DEBUG
-
-      SPI.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
-      Keyboard.begin(GPIO_NUM_33, GPIO_NUM_32);
-      PS2Controller.keyboard() -> setLayout(&fabgl::GermanLayout);                       //deutsche Tastatur
-      VGAController.begin();                                                             //VGA-Variante //64 oder 16 Farben
-
-      VGAController.setResolution(QVGA_320x240_60Hz);                                    //Standard-Auflösung
-      Terminal.begin(&VGAController);
-      Terminal.activate(TerminalTransition::None);
-      Terminal.connectLocally();                                                         // für Terminal Komandos
-      Terminal.loadFont(&fabgl::FONT_6x8);//6x8);
-
-      fbcolor(fColor, bColor);
-      tc.setCursorPos(1, 1);
-      Terminal.clear();
-      //GFX.clear();
-      Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.0 ---");
-
-      // 1. SPI und SD-Karte starten
-      spiSD.begin();
-
-      if (!SD.begin(kSD_CS, spiSD)) {
-        Terminal.print("SD-Karten-Fehler");
-      } else {
-        // Wenn die SD-Karte da ist, Ordner prüfen/erstellen
-        if (!SD.exists("/lua")) {
-          SD.mkdir("/lua");
-        }
-      }
-      delay(100);
-      //------------- nur bei Olimex - SBC ------------------------------------------
-      if (Expander.begin()) {
-        uint16_t ver = Expander.version();
-        Serial.printf("CH32V003 firmware version: %d.%d" EOL, ver >> 8, ver & 0xFF);
-      } else {
-        Serial.println("CH32V003 expander nicht gefunden oder SPI belegt!");
-      }
-      //------------- nur bei Olimex - SBC ------------------------------------------
-
-      delay(100);
-
-      if (!SD.begin(kSD_CS, spiSD)) {
-        Terminal.print("SD-Karten-Fehler");
-      }
-
-
-      // Prüfen, ob PSRAM auf dem ESP32 überhaupt aktiv/vorhanden ist
-      if (psramInit()) {
-        // 1. Editor-Puffer im PSRAM anlegen
-        textBuffer = (char*)ps_malloc(EDIT_BUFF_SIZE);
-
-        // 2. Clipboard-Puffer im PSRAM anlegen
-        clipboardBuffer = (char*)ps_malloc(CLIPBOARD_SIZE);
-
-        if (textBuffer != nullptr && clipboardBuffer != nullptr) {
-          memset(textBuffer, 0, EDIT_BUFF_SIZE);
-          memset(clipboardBuffer, 0, CLIPBOARD_SIZE);
-
-        } else {
-          Terminal.println("ERROR: Nicht genug PSRAM!");
-        }
-      } else {
-        Terminal.println("ERROR: Kein PSRAM gefunden!");
-      }
-
-      Terminal.enableCursor(false);
-
-      //--------------- ESP32 RTC starten und stellen --------------------
-      char const *compileDate = __DATE__;
-      char const *compileTime = __TIME__;
-
-      // Monate konvertieren
-      char monthStr[4];
-      int day, year, hour, minute, second;
-      sscanf(compileDate, "%s %d %d", monthStr, &day, &year);
-      sscanf(compileTime, "%d:%d:%d", &hour, &minute, &second);
-
-      int month = 1;
-      const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-      for (int i = 0; i < 12; i++) {
-        if (strcmp(monthStr, months[i]) == 0) {
-          month = i + 1;
+  while (true) {
+    while (ln) {
+      c = inchar();
+      switch (c) {
+        case 13:
+          inputBuffer += '\0';
+          Terminal.println();
+          ln = false;
           break;
-        }
+        case 127:
+          if (inputBuffer.length() > 0) {
+            inputBuffer.remove(inputBuffer.length() - 1);
+            Terminal.write("\b\e[K");
+          }
+          break;
+        case KEY_ESC:
+          ln = false;
+          break;
+        case KEY_F1:
+          inputBuffer = "run(\"file.lua\")\n";
+          ln = false;
+          break;
+        case KEY_F2:
+          inputBuffer = String("edit(\"") + currentEditingFilename + "\")\n";
+          currentEditingFilename = nullptr;
+          ln = false;
+          break;
+        case KEY_F3:
+          inputBuffer = String("run(\"") + currentEditingFilename + "\")\n";
+          currentEditingFilename = nullptr;
+          ln = false;
+          break;
+        case KEY_F4:
+          inputBuffer = "info()\n";
+          ln = false;
+          break;
+        default:
+          inputBuffer += (char)c;
+          Terminal.write(c);
+          break;
       }
-      e_rtc.setTime(second, minute, hour, day, month, year);
-
-
-
-      //------------------------------------------------------------------
-
-      // starte den Lua-Computer-Task auf Core 1
-      xTaskCreatePinnedToCore(
-        luaComputerTask,    // Funktion, die ausgeführt werden soll
-        "LuaTask",          // Name des Tasks
-        32768,              // Stack-Größe in Bytes (32 KB - absolut sicher für Lua)
-        NULL,               // Parameter, die übergeben werden
-        1,                  // Priorität des Tasks
-        &LuaTaskHandle,     // Task-Handle
-        1                   // Core (0 oder 1)
-      );
-      Terminal.print("> ");
     }
 
-    //######################################################## LOOP ########################################################
-    void loop() {
-      delay(1000);
+    int status = luaL_dostring(L, inputBuffer.c_str());//line);
+    inputBuffer = "";
+    if (status != LUA_OK) {
+      const char* errorMsg = lua_tostring(L, -1);
+      Terminal.printf("Fehler: %s\n", errorMsg);
+      lua_pop(L, 1);
     }
+    Terminal.println();
+    Terminal.print("> ");
+    ln = true;
+  }
+  vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+//######################################################## SETUP #######################################################
+void setup() {
+  Serial.begin(9600);                                                                // serielle Schnittstelle für DEBUG
+#ifdef OLIMEX
+SPI.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
+#else
+SPI.begin();
+#endif
+Keyboard.begin(GPIO_NUM_33, GPIO_NUM_32);                                          // Tastatur-Pins
+PS2Controller.keyboard() -> setLayout(&fabgl::GermanLayout);                       //deutsche Tastatur
+VGAController.begin();                                                             //VGA-Variante //64 oder 16 Farben
+
+  VGAController.setResolution(QVGA_320x240_60Hz);                                    //Standard-Auflösung
+  Terminal.begin(&VGAController);
+  Terminal.activate(TerminalTransition::None);
+  Terminal.connectLocally();                                                         // für Terminal Komandos
+  Terminal.loadFont(&fabgl::FONT_6x8);
+
+  fbcolor(fColor, bColor);
+  tc.setCursorPos(1, 1);
+  Terminal.clear();
+  Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.0 ---");
+  
+#ifdef OLIMEX
+spiSD.begin();
+#else
+spiSD.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
+#endif
+
+  if (!SD.begin(kSD_CS, spiSD)) {
+    Terminal.print("SD-Karten-Fehler");
+  } else {
+    if (!SD.exists("/lua")) {
+      SD.mkdir("/lua");
+    }
+  }
+  delay(100);
+
+
+  //------------- nur bei Olimex - SBC ------------------------------------------
+#ifdef OLIMEX
+if (Expander.begin()) {
+uint16_t ver = Expander.version();
+Serial.printf("CH32V003 firmware version: %d.%d" EOL, ver >> 8, ver & 0xFF);
+} else {
+Serial.println("CH32V003 expander nicht gefunden oder SPI belegt!");
+}
+//------------- nur bei Olimex - SBC ------------------------------------------
+delay(100);
+#endif
+
+
+  if (!SD.begin(kSD_CS, spiSD,4000000)) {
+    Terminal.print("SD-Karten-Fehler");
+  }
+
+  // Prüfen, ob PSRAM auf dem ESP32 überhaupt aktiv/vorhanden ist
+  if (psramInit()) {
+    // 1. Editor-Puffer im PSRAM anlegen
+    textBuffer = (char*)ps_malloc(EDIT_BUFF_SIZE);
+
+    // 2. Clipboard-Puffer im PSRAM anlegen
+    clipboardBuffer = (char*)ps_malloc(CLIPBOARD_SIZE);
+
+    if (textBuffer != nullptr && clipboardBuffer != nullptr) {
+      memset(textBuffer, 0, EDIT_BUFF_SIZE);
+      memset(clipboardBuffer, 0, CLIPBOARD_SIZE);
+
+    } else {
+      Terminal.println("ERROR: Nicht genug PSRAM!");
+    }
+  } else {
+    Terminal.println("ERROR: Kein PSRAM gefunden!");
+  }
+
+  Terminal.enableCursor(false);
+
+  //--------------- ESP32 RTC starten und stellen --------------------
+  char const *compileDate = __DATE__;
+  char const *compileTime = __TIME__;
+
+  // Monate konvertieren
+  char monthStr[4];
+  int day, year, hour, minute, second;
+  sscanf(compileDate, "%s %d %d", monthStr, &day, &year);
+  sscanf(compileTime, "%d:%d:%d", &hour, &minute, &second);
+
+  int month = 1;
+  const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  for (int i = 0; i < 12; i++) {
+    if (strcmp(monthStr, months[i]) == 0) {
+      month = i + 1;
+      break;
+    }
+  }
+  e_rtc.setTime(second, minute, hour, day, month, year);
+
+  //------------------------------------------------------------------
+
+  // starte den Lua-Computer-Task auf Core 1
+  xTaskCreatePinnedToCore(
+    luaComputerTask,    // Funktion, die ausgeführt werden soll
+    "LuaTask",          // Name des Tasks
+    32768,              // Stack-Größe in Bytes (32 KB - absolut sicher für Lua)
+    NULL,               // Parameter, die übergeben werden
+    1,                  // Priorität des Tasks
+    &LuaTaskHandle,     // Task-Handle
+    1                   // Core (0 oder 1)
+  );
+  Terminal.print("> ");
+}
+
+//######################################################## LOOP ########################################################
+void loop() {
+  delay(1000);
+}
