@@ -188,7 +188,7 @@ static File openFiles[MAX_OPEN_FILES];
 
 // ------ Board_Type OLIMEX_SBC ----------------------
 #ifdef OLIMEX
-#include "CH32V003.h"
+#include "devdrivers/CH32V003.h"  //Treiber muss sich im Fabgl-Ordner devdrivers befinden
 CH32V003 Expander;
 #define kSD_MISO 35
 #else
