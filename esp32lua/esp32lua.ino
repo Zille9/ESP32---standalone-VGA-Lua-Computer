@@ -18,7 +18,8 @@
 //      Connections: SD-Card -> TTGO VGA 1.4 oder OLIMEX SBC                                                                                      //
 //                   VGA-Beschaltung: siehe FabGl/TTGO VGA                                                                                        //
 //                                                                                                                                                //
-//                                                                                                                                                //
+//      Compiler-Einstellungen : CPU-Freq=240MHz, PSRAM=Enabled, Partitionscheme=Minimal SPIFFS 1,9MB with OTA/190kB SPIFFS                       //
+//                               MCU-TYP=ESP32 Dev Module                                                                                         //
 //                                                                                                                                                //
 //                                                                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -188,7 +189,7 @@ static File openFiles[MAX_OPEN_FILES];
 
 // ------ Board_Type OLIMEX_SBC ----------------------
 #ifdef OLIMEX
-#include "devdrivers/CH32V003.h"  //Treiber muss sich im Fabgl-Ordner devdrivers befinden
+#include "devdrivers/CH32V003.h"
 CH32V003 Expander;
 #define kSD_MISO 35
 #else
@@ -3819,7 +3820,7 @@ VGAController.begin();                                                          
   fbcolor(fColor, bColor);
   tc.setCursorPos(1, 1);
   Terminal.clear();
-  Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.0 ---");
+  Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.5 ---");
   
 #ifdef OLIMEX
 spiSD.begin();
