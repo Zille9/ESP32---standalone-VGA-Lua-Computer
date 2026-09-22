@@ -24,6 +24,9 @@
 //                                                                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // ################################################### Projekt-Tagebuch ############################################################################
+// 22.09.2026
+// sd.ls() und sd.listfile() auf alphabetische ausgabe umgebaut
+//
 // 07.08.2026
 // Lua-Befehl vga.swap(x,y,w,h) hinzugefügt um Bildschirmbereiche zu invertieren -> Filemanager in Lua auf swap umgebaut, das läuft jetzt flüssiger
 // Lua-Befehl sd.hexmon(dateiname) hinzugefügt, um Dateien im Hexmonitor-Stil anzuzeigen
@@ -217,6 +220,7 @@ ESP32Time e_rtc(0);  // offset in seconds GMT+1
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------
 #include <vector>
+#include <algorithm>
 
 TaskHandle_t LuaTaskHandle = NULL;
 
@@ -552,15 +556,15 @@ extern "C" {
   }
 
   //************************************* Lua-info() *********************************************
-int lua_info(lua_State *L) {
+  int lua_info(lua_State *L) {
     uint32_t freeHeap = ESP.getFreeHeap();
     int luaMemKb = lua_gc(L, LUA_GCCOUNT, 0);
     int luaMemBytesRemainder = lua_gc(L, LUA_GCCOUNTB, 0);
     uint32_t totalLuaBytes = (luaMemKb * 1024) + luaMemBytesRemainder;
-    
+
     Terminal.println();
     Terminal.println("--- SYSTEM SPEICHER & VERSION ---");
-    Terminal.printf(" Lua Version             : %s\n\r", LUA_RELEASE); 
+    Terminal.printf(" Lua Version             : %s\n\r", LUA_RELEASE);
     Terminal.printf(" Interner RAM (Heap) frei: %d Bytes (%d KB)\n\r", freeHeap, freeHeap / 1024);
     Terminal.printf(" max. Lua PSRAM          : %d Bytes (%d KB)\n\r", LUA_MAX_PSRAM, LUA_MAX_PSRAM / 1024);
     Terminal.printf(" Lua-Engine belegt       : %d Bytes (%d KB)\n\r", totalLuaBytes, luaMemKb);
@@ -568,32 +572,14 @@ int lua_info(lua_State *L) {
     Terminal.printf(" freier PSRAM gesamt     : %d Bytes\n\r", ESP.getFreePsram());
     Terminal.printf(" Editor Puffergroesse    : %d Bytes (%d KB)\n\r", textLen, EDIT_BUFF_SIZE / 1024);
     Terminal.println("---------------------------------");
-    
+
     // Rückgabewerte an das Lua-Skript:
     lua_pushinteger(L, freeHeap);   // 1. Rückgabewert: Freier Heap (Zahl)
     lua_pushstring(L, LUA_RELEASE); // 2. Rückgabewert: Version (String)
-    
+
     return 2; // Signalisisiert Lua, dass jetzt 2 Werte auf dem Stack liegen
-}
-/*
-  int lua_info(lua_State *L) {
-    uint32_t freeHeap = ESP.getFreeHeap();
-    int luaMemKb = lua_gc(L, LUA_GCCOUNT, 0);
-    int luaMemBytesRemainder = lua_gc(L, LUA_GCCOUNTB, 0);
-    uint32_t totalLuaBytes = (luaMemKb * 1024) + luaMemBytesRemainder;
-    Terminal.println();
-    Terminal.println("--- SYSTEM SPEICHER ---");
-    Terminal.printf(" Interner RAM (Heap) frei: %d Bytes (%d KB)\n\r", freeHeap, freeHeap / 1024);
-    Terminal.printf(" max. Lua PSRAM          : %d Bytes (%d KB)\n\r", LUA_MAX_PSRAM, LUA_MAX_PSRAM / 1024);
-    Terminal.printf(" Lua-Engine belegt       : %d Bytes (%d KB)\n\r", totalLuaBytes, luaMemKb);
-    Terminal.printf(" Lua PSRAM-Auslastung    : %.2f%% \n\r", ((float)luaCurrentMemoryUsage / LUA_MAX_PSRAM) * 100.0);
-    Terminal.printf(" freier PSRAM gesamt     : %d Bytes\n\r", ESP.getFreePsram());
-    Terminal.printf(" Editor Puffergroesse    : %d Bytes (%d KB)\n\r", textLen, EDIT_BUFF_SIZE / 1024);
-    Terminal.println("-----------------------");
-    lua_pushinteger(L, freeHeap);
-    return 1;
   }
-*/
+
   //********************************************** Grafikfunktionen *************************************
   // ============================================================================
   // VGA GRAPHICS INTERFACE (Modul: vga)
@@ -2213,131 +2199,170 @@ int lua_info(lua_State *L) {
 
   //---------------------------------------------- sd.ls(*lua) ----------------------------------------------------------
   // 1. Datei mit Wildcard suchen sd.ls("*lua")
-  int lua_sd_ls(lua_State* L) {
-    String searchPattern = "*";                                                         // Standardmäßig alles anzeigen
-    String path = currentWorkDir;
+int lua_sd_ls(lua_State* L) {
 
-    if (lua_gettop(L) >= 1 && lua_isstring(L, 1)) {                                      // Parameter auswerten
-      String parg = lua_tostring(L, 1);
+  // Dadurch kann die Arduino-IDE sie beim automatischen Generieren von Prototypen nicht übersehen oder verschieben!
+  struct LocalFileEntry {
+    String name;
+    bool isDirectory;
+    unsigned long size;
+  };
 
-      if (parg.indexOf('*') != -1 || parg.indexOf('?') != -1) {                             // Prüfen, ob ein Wildcard (* oder ?) benutzt
-        int lastSlash = parg.lastIndexOf('/');
-        if (lastSlash != -1) {
-          path = parg.substring(0, lastSlash + 1);
-          searchPattern = parg.substring(lastSlash + 1);
-        } else {
-          path = currentWorkDir;
-          searchPattern = parg;
-        }
+  String searchPattern = "*";                                                         
+  String path = currentWorkDir;
+
+  if (lua_gettop(L) >= 1 && lua_isstring(L, 1)) {                                      
+    String parg = lua_tostring(L, 1);
+
+    if (parg.indexOf('*') != -1 || parg.indexOf('?') != -1) {                             
+      int lastSlash = parg.lastIndexOf('/');
+      if (lastSlash != -1) {
+        path = parg.substring(0, lastSlash + 1);
+        searchPattern = parg.substring(lastSlash + 1);
       } else {
-
-        path = resolve_lua_path(parg);                                                     // Ordnerpfad ohne Wildcard, mit Pfad-Resolver prüfen
-        if (!path.endsWith("/")) path += "/";
+        path = currentWorkDir;
+        searchPattern = parg;
       }
+    } else {
+      path = resolve_lua_path(parg);                                                     
+      if (!path.endsWith("/")) path += "/";
     }
+  }
 
+  String cleanPath = path;
 
-    String cleanPath = path;
+  if (cleanPath.length() > 1 && cleanPath.endsWith("/")) {                              
+    cleanPath = cleanPath.substring(0, cleanPath.length() - 1);
+  }
 
-    if (cleanPath.length() > 1 && cleanPath.endsWith("/")) {                              // Wenn der Pfad mit "/" endet, abschneiden
-      cleanPath = cleanPath.substring(0, cleanPath.length() - 1);
-    }
-
-    File dir = SD.open(cleanPath.c_str());
-    if (!dir || !dir.isDirectory()) {
-      lua_pushboolean(L, false);
-      return 1;
-    }
-    dir.seek(0);                                                                          //an den Verzeichnisanfang springen
-
-    Terminal.print("--- Verzeichnis: ");                                                  // Header ausgeben (mit aktiven Filter)
-    Terminal.print(cleanPath.c_str());
-    if (searchPattern != "*") {
-      Terminal.print(" [Filter: ");
-      Terminal.print(searchPattern.c_str());
-      Terminal.print("]");
-    }
-    Terminal.print(" ---\n\r");
-
-    Terminal.print("Name                     Typ      Groesse\n\r");
-    Terminal.print("-----------------------------------------------\n\r");
-
-    int zeilenZaehler = 3;
-
-    while (true) {
-      File entry = dir.openNextFile();
-      if (!entry) break;
-
-      const char* rawName = entry.name();
-      const char* fileName = strrchr(rawName, '/');                               // Sucht nach dem letzten Schrägstrich im Pfad
-
-      if (fileName != NULL) {
-        fileName++;                                                               // Springt hinter das '/' zum eigentlichen Dateinamen
-      } else {
-        fileName = rawName;                                                       // Kein '/' , ganzer String ist der Dateiname
-      }
-
-      if (fileName[0] == '.' ||                                                   // Unsichtbare Dateien / AppleDouble (._)
-          strcasecmp(fileName, "System Volume Information") == 0 ||
-          strcasecmp(fileName, "FOUND.000") == 0 ||
-          strncasecmp(fileName, "._", 2) == 0) {                                  // "._" Abfrage auf 2 Zeichen verkürzt
-        entry.close();
-        continue;
-      }
-
-      if (!entry.isDirectory() && !wildcard_match(searchPattern.c_str(), fileName)) {        // Wildcard-Filter ausser bei Ordnern
-        entry.close();
-        continue;                                                                           // Passt nicht zum Filter -> Überspringen
-      }
-
-      char displayName[25];                                                                 // Dateinamen formatieren und bei Bedarf kürzen
-      size_t nameLen = strlen(fileName);
-
-      if (nameLen > 20) {
-        strncpy(displayName, fileName, 18);
-        displayName[18] = '.';
-        displayName[19] = '.';
-        displayName[20] = '\0';
-      } else {
-        strcpy(displayName, fileName);
-      }
-
-      char spaltenBuf[80];                                                                  // Zeilenpuffer für Spaltenlayout
-      if (entry.isDirectory()) {
-        snprintf(spaltenBuf, sizeof(spaltenBuf), "%-24s <DIR>    ---", displayName);
-      } else {
-        char groesseStr[20];
-        snprintf(groesseStr, sizeof(groesseStr), "%lu Bytes", (unsigned long)entry.size());
-        snprintf(spaltenBuf, sizeof(spaltenBuf), "%-24s FILE     %s", displayName, groesseStr);
-      }
-
-      Terminal.print(spaltenBuf);
-      Terminal.print("\n\r");
-      entry.close();
-
-      zeilenZaehler++;
-
-      if (zeilenZaehler >= MAX_R - 4) {                                                       // Seitenumbruch-Logik (MAX_R - 4)
-        Terminal.print("-- WEITER MIT TASTE | ESC ZUM ABBRECHEN --\r");
-        int taste = wait_key(1);
-        delay(150);
-        Terminal.print("                                          \r");
-
-        if (taste == 27) {                                                                    // ESC gedrückt
-          dir.close();
-          lua_pushboolean(L, true);
-          return 1;
-        }
-        zeilenZaehler = 0;
-      }
-    }
-
-    dir.close();
-    Terminal.print("-----------------------------------------------\n\r");
-
-    lua_pushboolean(L, true);
+  File dir = SD.open(cleanPath.c_str());
+  if (!dir || !dir.isDirectory()) {
+    lua_pushboolean(L, false);
     return 1;
   }
+  dir.seek(0);                                                                          
+
+  // Vektoren zum Zwischenspeichern unter Verwendung der lokalen Struktur
+  std::vector<LocalFileEntry> folders;
+  std::vector<LocalFileEntry> files;
+
+  // 1. Alle Dateien einlesen und filtern
+  while (true) {
+    File entry = dir.openNextFile();
+    if (!entry) break;
+
+    const char* rawName = entry.name();
+    const char* fileName = strrchr(rawName, '/');                               
+
+    if (fileName != NULL) {
+      fileName++;                                                               
+    } else {
+      fileName = rawName;                                                       
+    }
+
+    if (fileName[0] == '.' ||                                                   
+        strcasecmp(fileName, "System Volume Information") == 0 ||
+        strcasecmp(fileName, "FOUND.000") == 0 ||
+        strncasecmp(fileName, "._", 2) == 0) {
+      entry.close();
+      continue;
+    }
+
+    if (!entry.isDirectory() && !wildcard_match(searchPattern.c_str(), fileName)) {
+      entry.close();
+      continue;
+    }
+
+    // Eintrag im passenden Vektor speichern
+    LocalFileEntry fe;
+    fe.name = fileName;
+    fe.isDirectory = entry.isDirectory();
+    fe.size = entry.size();
+
+    if (fe.isDirectory) {
+      folders.push_back(fe);
+    } else {
+      files.push_back(fe);
+    }
+
+    entry.close();
+  }
+  dir.close();
+
+  // 2. Beide Listen alphabetisch sortieren (mit C++11 Lambda-Funktion)
+  auto compareLambda = [](const LocalFileEntry& a, const LocalFileEntry& b) {
+    return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
+  };
+
+  std::sort(folders.begin(), folders.end(), compareLambda);
+  std::sort(files.begin(), files.end(), compareLambda);
+
+  // 3. Header ausgeben
+  Terminal.print("--- Verzeichnis: ");
+  Terminal.print(cleanPath.c_str());
+  if (searchPattern != "*") {
+    Terminal.print(" [Filter: ");
+    Terminal.print(searchPattern.c_str());
+    Terminal.print("]");
+  }
+  Terminal.print(" ---\n\r");
+
+  Terminal.print("Name                     Typ      Groesse\n\r");
+  Terminal.print("-----------------------------------------------\n\r");
+
+  int zeilenZaehler = 3;
+
+  // Zusammenführen der Listen für die Anzeige (Ordner zuerst)
+  std::vector<LocalFileEntry> allEntries = folders;
+  allEntries.insert(allEntries.end(), files.begin(), files.end());
+
+  // 4. Sortierte Liste formatiert ausgeben
+  for (const auto& entry : allEntries) {
+    char displayName[25]; 
+    size_t nameLen = entry.name.length();
+
+    if (nameLen > 20) {
+      strncpy(displayName, entry.name.c_str(), 18);
+      displayName[18] = '.';
+      displayName[19] = '.';
+      displayName[20] = '\0';
+    } else {
+      strcpy(displayName, entry.name.c_str());
+    }
+
+    char spaltenBuf[80]; 
+    if (entry.isDirectory) {
+      snprintf(spaltenBuf, sizeof(spaltenBuf), "%-24s <DIR>    ---", displayName);
+    } else {
+      char groesseStr[20]; 
+      snprintf(groesseStr, sizeof(groesseStr), "%lu Bytes", entry.size);
+      snprintf(spaltenBuf, sizeof(spaltenBuf), "%-24s FILE     %s", displayName, groesseStr);
+    }
+
+    Terminal.print(spaltenBuf);
+    Terminal.print("\n\r");
+
+    zeilenZaehler++;
+
+    // Seitenumbruch-Logik
+    if (zeilenZaehler >= MAX_R - 4) {
+      Terminal.print("-- WEITER MIT TASTE | ESC ZUM ABBRECHEN --\r");
+      int taste = wait_key(1);
+      delay(150);
+      Terminal.print("                                          \r");
+
+      if (taste == 27) { // ESC gedrückt
+        lua_pushboolean(L, true);
+        return 1;
+      }
+      zeilenZaehler = 0;
+    }
+  }
+
+  Terminal.print("-----------------------------------------------\n\r");
+  lua_pushboolean(L, true);
+  return 1;
+}
 
   //---------------------------------------------- sd.cd("pfadname") ----------------------------------------------------------
   // 2. sd.cd("pfad") in Lua
@@ -2670,8 +2695,14 @@ int lua_info(lua_State *L) {
   }
   //---------------------------------------------- sd.listfile() ------------------------------------------------------------
   // 16. erstellt eine Tabelle der Dateien auf der SD-Karte (REINER DATEINAME)
-  int lua_sd_get_file_list(lua_State* L) {
-    lua_newtable(L);
+int lua_sd_get_file_list(lua_State* L) {
+    // 1. Lokale Struktur direkt in der Funktion definieren (verhindert IDE-Prototypen-Fehler)
+    struct ListEntry {
+      String name;
+      bool isDirectory;
+      unsigned long size;
+    };
+
     String cleanPath = currentWorkDir;
     if (cleanPath.length() > 1 && cleanPath.endsWith("/")) {                      // Wenn der Pfad mit "/" endet, abschneiden
       cleanPath = cleanPath.substring(0, cleanPath.length() - 1);
@@ -2679,18 +2710,21 @@ int lua_info(lua_State *L) {
 
     File root = SD.open(cleanPath.c_str());
     if (!root || !root.isDirectory()) {
+      lua_newtable(L); // Leere Tabelle zurückgeben, falls Ordner nicht lesbar
       return 1;
     }
 
-    int eintragIndex = 1;
+    std::vector<ListEntry> folders;
+    std::vector<ListEntry> files;
 
+    // 2. Alle Einträge einlesen, filtern und in Vektoren zwischenspeichern
     while (true) {
       File file = root.openNextFile();
       if (!file) {
         break; // Keine Dateien mehr vorhanden
       }
 
-      // ================== 1. PFADABSCHNEIDUNG (Zuerst ausführen!) ==================
+      // ================== PFADABSCHNEIDUNG ==================
       String roherName = String(file.name());
       String reinerName = roherName;
 
@@ -2699,7 +2733,7 @@ int lua_info(lua_State *L) {
         reinerName = roherName.substring(letzterSlash + 1);
       }
 
-      char ersterBuchstabe = reinerName.length() > 0 ? reinerName[0] : '\0';          //unsichtbare und Systemdateien ausblenden
+      char ersterBuchstabe = reinerName.length() > 0 ? reinerName[0] : '\0';          // unsichtbare und Systemdateien ausblenden
       if (ersterBuchstabe == '.' || ersterBuchstabe == 'S' || ersterBuchstabe == 's' || ersterBuchstabe == 'F' || ersterBuchstabe == 'f') {
         if (strcasecmp(reinerName.c_str(), "System Volume Information") == 0 ||
             strcasecmp(reinerName.c_str(), "FOUND.000") == 0 ||
@@ -2709,36 +2743,69 @@ int lua_info(lua_State *L) {
         }
       }
 
-      lua_newtable(L);
-      lua_pushstring(L, reinerName.c_str());
-      lua_rawseti(L, -2, 1);
+      // Eintrag temporär speichern
+      ListEntry entry;
+      entry.name = reinerName;
+      entry.isDirectory = file.isDirectory();
+      entry.size = file.size();
 
-      // Spalte 2: Dateigröße formatieren und hinzufügen
-      if (file.isDirectory()) {
-        lua_pushstring(L, "---"); // Ordner haben keine Dateigröße
-        lua_rawseti(L, -2, 2);    // Index 2
-
-        lua_pushstring(L, "ORDNER"); // Spalte 3: Typ
-        lua_rawseti(L, -2, 3);    // Index 3
+      if (entry.isDirectory) {
+        folders.push_back(entry);
       } else {
-        // Größe lesbar in KB umrechnen
-        char sizeBuf[16];
-        snprintf(sizeBuf, sizeof(sizeBuf), "%.1f KB", (float)file.size() / 1024.0f);
-        lua_pushstring(L, sizeBuf);
-        lua_rawseti(L, -2, 2);    // Index 2
-
-        lua_pushstring(L, "DATEI");   // Spalte 3: Typ
-        lua_rawseti(L, -2, 3);        // Index 3
+        files.push_back(entry);
       }
 
-
-      lua_rawseti(L, -2, eintragIndex);                                           // fertige Unter-Tabelle (Zeile) in Haupt-Tabelle einfügen
-      eintragIndex++;
-      file.close();
+      file.close(); // Datei sofort schließen!
     }
     root.close();
-    return 1;
-  }
+
+    // 3. Beide Listen alphabetisch sortieren (Case-Insensitive Lambda)
+    auto compareLambda = [](const ListEntry& a, const ListEntry& b) {
+      return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
+    };
+    std::sort(folders.begin(), folders.end(), compareLambda);
+    std::sort(files.begin(), files.end(), compareLambda);
+
+    // 4. Haupt-Lua-Tabelle erstellen
+    lua_newtable(L);
+    int eintragIndex = 1;
+
+    // Ordner zuerst in die Tabelle einfügen
+    for (const auto& entry : folders) {
+      lua_newtable(L);
+      lua_pushstring(L, entry.name.c_str());
+      lua_rawseti(L, -2, 1); // Spalte 1: Name
+
+      lua_pushstring(L, "---");
+      lua_rawseti(L, -2, 2); // Spalte 2: Größe
+
+      lua_pushstring(L, "ORDNER");
+      lua_rawseti(L, -2, 3); // Spalte 3: Typ
+
+      lua_rawseti(L, -2, eintragIndex);
+      eintragIndex++;
+    }
+
+    // Danach die Dateien einfügen
+    for (const auto& entry : files) {
+      lua_newtable(L);
+      lua_pushstring(L, entry.name.c_str());
+      lua_rawseti(L, -2, 1); // Spalte 1: Name
+
+      char sizeBuf[16];
+      snprintf(sizeBuf, sizeof(sizeBuf), "%.1f KB", (float)entry.size / 1024.0f);
+      lua_pushstring(L, sizeBuf);
+      lua_rawseti(L, -2, 2); // Spalte 2: Größe
+
+      lua_pushstring(L, "DATEI");
+      lua_rawseti(L, -2, 3); // Spalte 3: Typ
+
+      lua_rawseti(L, -2, eintragIndex);
+      eintragIndex++;
+    }
+
+    return 1; // Gibt die Haupttabelle an Lua zurück
+}
 
 
   //---------------------------------------------- sd.pwd() ------------------------------------------------------------
@@ -3820,8 +3887,8 @@ VGAController.begin();                                                          
   fbcolor(fColor, bColor);
   tc.setCursorPos(1, 1);
   Terminal.clear();
-  Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.5 ---");
-  
+  Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.6 ---");
+
 #ifdef OLIMEX
 spiSD.begin();
 #else
@@ -3851,7 +3918,7 @@ delay(100);
 #endif
 
 
-  if (!SD.begin(kSD_CS, spiSD,4000000)) {
+  if (!SD.begin(kSD_CS, spiSD, 4000000)) {
     Terminal.print("SD-Karten-Fehler");
   }
 
