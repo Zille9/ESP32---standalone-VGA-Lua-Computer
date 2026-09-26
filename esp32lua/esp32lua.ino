@@ -88,6 +88,7 @@ fabgl::SoundGenerator SoundGenerator;
 
 #include <JPEGDEC.h>                    //JPEG-Decoder
 JPEGDEC jpeg;
+static uint8_t zeilenBuffer[640];       //Zeilenpuffer für jpeg Bildaufbau
 
 //**************************** EDITOR - Varablen **********************************************
 #define EDIT_BUFF_SIZE 131072     // 128 KB (Oder 262144 für 256 KB – ganz nach Wunsch!)
@@ -1363,6 +1364,63 @@ int JPEGDraw(JPEGDRAW * pDraw) {
   int xStart = pDraw->x;
   int yStart = pDraw->y;
 
+  auto canvas = &GFX; // Deine FabGL-Canvas-Instanz
+
+  // Vertikaler Clipping-Schutz
+  if (yStart >= 240 || yStart + pDraw->iHeight < 0) return 1;
+
+  for (int y = 0; y < pDraw->iHeight; y++) {
+    int currentY = yStart + y;
+    // Falls Zeile außerhalb des Bildschirms liegt, überspringen
+    if (currentY < 0 || currentY >= 240) {
+      pSrc += pDraw->iWidth;
+      continue;
+    }
+
+    // Horizontaler Clipping-Schutz
+    int zeichneBreite = pDraw->iWidth;
+    if (xStart + zeichneBreite > 320) {
+      zeichneBreite = 320 - xStart;
+    }
+    if (zeichneBreite <= 0) {
+      pSrc += pDraw->iWidth;
+      continue;
+    }
+
+    // 1. Pixel der aktuellen JPEG-Zeile konvertieren
+    for (int x = 0; x < zeichneBreite; x++) {
+      uint16_t p = *pSrc++;
+      
+      // Bits aus RGB565 isolieren
+      uint8_t r5 = (p >> 11) & 0x1F; // 5 Bits Rot
+      uint8_t g6 = (p >> 5)  & 0x3F; // 6 Bits Grün
+      uint8_t b5 = p         & 0x1F; // 5 Bits Blau
+
+      // Auf die 2 Bits reduzieren, die FabGLs Hardware pro Kanal im 8-Bit-Modus erwartet
+      uint8_t r2 = r5 >> 3; // die obersten 2 von 5 Bits
+      uint8_t g2 = g6 >> 4; // die obersten 2 von 6 Bits
+      uint8_t b2 = b5 >> 3; // die obersten 2 von 5 Bits
+      uint8_t a2 = 3;       // Alpha voll deckend (Bits 11), damit kein Hintergrund fehlt!
+      zeilenBuffer[x] = r2 | (g2 << 2) | (b2 << 4) | (a2 << 6);
+      }
+    
+    // Falls der Block breiter war als der sichtbare Bildschirm, Rest überspringen
+    if (zeichneBreite < pDraw->iWidth) {
+      pSrc += (pDraw->iWidth - zeichneBreite);
+     }
+
+    fabgl::Bitmap zeilenBitmap(zeichneBreite, 1, zeilenBuffer, fabgl::PixelFormat::RGBA2222);
+    canvas->drawBitmap(xStart, currentY, &zeilenBitmap);
+    canvas->waitCompletion(false);
+  }
+  return 1;
+}
+/*
+int JPEGDraw(JPEGDRAW * pDraw) {
+  uint16_t *pSrc = pDraw->pPixels;
+  int xStart = pDraw->x;
+  int yStart = pDraw->y;
+
   for (int y = 0; y < pDraw->iHeight; y++) {
     int currentY = yStart + y;
     if (currentY >= Display_hoehe) break; // Vertikaler Clipping-Schutz
@@ -1386,7 +1444,7 @@ int JPEGDraw(JPEGDRAW * pDraw) {
   }
   return 1;
 }
-
+*/
 
 void * myOpen(const char *filename, int32_t *size) {
   String fullPath = resolve_lua_path(filename);
