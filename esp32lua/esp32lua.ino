@@ -24,6 +24,9 @@
 //                                                                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // ################################################### Projekt-Tagebuch ############################################################################
+// 26.09.2026
+// vga.jpg(dateiname[,x,y,scal]) zur Darstellung von JPEG-Dateien hinzugefgügt
+//
 // 22.09.2026
 // sd.ls() und sd.listfile() auf alphabetische ausgabe umgebaut
 //
@@ -83,6 +86,8 @@ fabgl::Canvas           GFX(&VGAController);
 TerminalController      tc(&Terminal);
 fabgl::SoundGenerator SoundGenerator;
 
+#include <JPEGDEC.h>                    //JPEG-Decoder
+JPEGDEC jpeg;
 
 //**************************** EDITOR - Varablen **********************************************
 #define EDIT_BUFF_SIZE 131072     // 128 KB (Oder 262144 für 256 KB – ganz nach Wunsch!)
@@ -184,7 +189,7 @@ bool Window_aktiv = false;
 #include <SPI.h>
 
 SPIClass spiSD(HSPI);
-//File fp;
+File fp;
 #define MAX_OPEN_FILES 4
 static File openFiles[MAX_OPEN_FILES];
 
@@ -1351,6 +1356,95 @@ extern "C" {
     lua_pushboolean(L, erfolg);
     return 1;
   }
+  
+//----------------------------------- jpeg-Dateien anzeigen -----------------------------------------------------------
+int JPEGDraw(JPEGDRAW * pDraw) {
+  uint16_t *pSrc = pDraw->pPixels;
+  int xStart = pDraw->x;
+  int yStart = pDraw->y;
+
+  for (int y = 0; y < pDraw->iHeight; y++) {
+    int currentY = yStart + y;
+    if (currentY >= Display_hoehe) break; // Vertikaler Clipping-Schutz
+    
+    for (int x = 0; x < pDraw->iWidth; x++) {
+      uint16_t p = *pSrc++;
+      
+      if ((xStart + x < Display_breite) && (currentY < Display_hoehe)) {
+        // 1. Bits aus dem RGB565 extrahieren
+        uint8_t r5 = (p >> 11) & 0x1F;
+        uint8_t g6 = (p >> 5)  & 0x3F;
+        uint8_t b5 = p         & 0x1F;
+        // 2. Auf echte 8-Bit Werte (0-255) hochskalieren (Bit-Shifting + Bit-Kopie für echtes Weiß)
+        uint8_t r8 = (r5 << 3) | (r5 >> 2);
+        uint8_t g8 = (g6 << 2) | (g6 >> 4);
+        uint8_t b8 = (b5 << 3) | (b5 >> 2);
+        
+        GFX.setPixel(xStart + x, currentY, fabgl::RGB888(r8, g8, b8));
+      }
+    }
+  }
+  return 1;
+}
+
+
+void * myOpen(const char *filename, int32_t *size) {
+  String fullPath = resolve_lua_path(filename);
+  fp = SD.open(fullPath.c_str(), FILE_READ);
+  if (fp) {
+    *size = fp.size();
+    return &fp;
+  }
+  //syntaxerror(notexistmsg);
+  return NULL;
+}
+
+void myClose(void *handle) {
+  if (handle) fp.close();
+}
+
+int32_t myRead(JPEGFILE * handle, uint8_t *buffer, int32_t length) {
+  return fp.read(buffer, length);
+}
+
+int32_t mySeek(JPEGFILE * handle, int32_t position) {
+  return fp.seek(position);
+}
+
+// vga.jpeg(datei[,x,y,Skalierung])
+int lua_vga_jpeg(lua_State *L) {
+  // 1. Pflicht-Parameter: Dateiname (muss an Position 1 stehen)
+  if (!lua_isstring(L, 1)) {
+    lua_pushboolean(L, false);
+    lua_pushstring(L, "Fehler: Kein Dateiname übergeben.");
+    return 2; 
+  }
+  const char* dateiname = lua_tostring(L, 1);
+
+  int xPos     = luaL_optinteger(L, 2, 0); // Standard: X = 0
+  int yPos     = luaL_optinteger(L, 3, 0); // Standard: Y = 0
+  int scaleOpt = luaL_optinteger(L, 4, 0); // Standard: Keine Skalierung (0)
+
+  // Validierung für die JPEGDEC Skalierungswerte (Erlaubt sind nur 0, 2, 4, 8)
+  if (scaleOpt != 0 && scaleOpt != 2 && scaleOpt != 4 && scaleOpt != 8) {
+    lua_pushboolean(L, false);
+    lua_pushstring(L, "Fehler: Skalierung (Parameter 4) darf nur 0, 2, 4 oder 8 sein.");
+    return 2;
+  }
+
+  if (jpeg.open(dateiname, myOpen, myClose, myRead, mySeek, JPEGDraw)){
+    jpeg.decode(xPos, yPos, scaleOpt); 
+    jpeg.close();
+    lua_pushboolean(L, true); 
+    return 1;                 
+  } else {
+    lua_pushboolean(L, false);
+    lua_pushstring(L, "Fehler: Dateifehler.");
+    return 2;                 
+  }
+}
+
+
 
   // ============================================================================
   // LUA - FULLSCREEN-EDITOR
@@ -2906,7 +3000,7 @@ return 1;
       return 1;
     }
 
-    //---------------------------------------------- sd.sseek(fileHandle, position) ------------------------------------------------
+    //---------------------------------------------- sd.seek(fileHandle, position) ------------------------------------------------
     // 20. Lesezeiger versetzen: sd.seek(fileHandle, absolute_position)
     int lua_sd_seek(lua_State* L) {
       int slot = luaL_checkinteger(L, 1);
@@ -3723,6 +3817,7 @@ int c;
   lua_pushcfunction(L, lua_vga_bmpload);       lua_setfield(L, -2, "bmpLoad");
   lua_pushcfunction(L, lua_vga_bmpsave);       lua_setfield(L, -2, "bmpSave");
   lua_pushcfunction(L, lua_vga_swap);          lua_setfield(L, -2, "swap");
+  lua_pushcfunction(L, lua_vga_jpeg);          lua_setfield(L, -2, "jpg");
   lua_setglobal(L, "vga");        // Die Tabelle "vga" registrieren
   //-------------------------------- Lua sys-Funktionen -----------------------------
   lua_newtable(L);
