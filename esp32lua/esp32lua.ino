@@ -74,8 +74,11 @@
 // Window-Funktionen sind jetzt ebenfalls integriert, auch überlappende Fenster funktionieren, solange man immer das oberste Fenster zuerst wieder löscht
 //
 //******************** BOARD-AUSWAHL **********************
-#define OLIMEX
-//#define TTGO
+#define OLIMEX 1
+#define TTGO 2
+
+#define BOARD_TYPE OLIMEX
+//#define BOARD_TYPE TTGO
 //*********************************************************
 
 #include <Arduino.h>
@@ -197,7 +200,7 @@ static File openFiles[MAX_OPEN_FILES];
 //---------------- Board-Auswahl ---------------------
 
 // ------ Board_Type OLIMEX_SBC ----------------------
-#ifdef OLIMEX
+#ifdef BOARD_TYPE == OLIMEX
 #include "devdrivers/CH32V003.h"
 CH32V003 Expander;
 #define kSD_MISO 35
@@ -3498,7 +3501,7 @@ return 1;
       }
     }
     //############################################ GPIO Funktionen ####################################################
-#ifdef OLIMEX
+#ifdef BOARD_TYPE == OLIMEX
 int lua_gpioTest(lua_State* L) {
 // 1. PHASE: Pin 9 (PORTD, Pin 4) exakt wie im C++ Example als Eingang konfigurieren
 Expander.configureUEXT (GPIO_Pin_6, DIRECTION_IN, 1);   // Pull up/down: GPIO4 pulled down (0)
@@ -3914,7 +3917,7 @@ int c;
   //---------------------------------------------------------------------------------
 
   //-------------------------------- Lua gpio-Funktionen ----------------------------
-#ifdef OLIMEX
+#ifdef BOARD_TYPE == OLIMEX
 lua_newtable(L);
 int tableIndex = lua_gettop(L);
 
@@ -4022,7 +4025,7 @@ int tableIndex = lua_gettop(L);
 //######################################################## SETUP #######################################################
 void setup() {
   Serial.begin(9600);                                                                // serielle Schnittstelle für DEBUG
-#ifdef OLIMEX
+#ifdef BOARD_TYPE == OLIMEX
 SPI.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
 #else
 SPI.begin();
@@ -4042,7 +4045,7 @@ VGAController.begin();                                                          
   Terminal.clear();
   Terminal.println("\n--- ESP32 Lua - COMPUTER V.1.6 ---");
 
-#ifdef OLIMEX
+#ifdef BOARD_TYPE == OLIMEX
 spiSD.begin();
 #else
 spiSD.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
@@ -4059,7 +4062,7 @@ spiSD.begin(kSD_CLK, kSD_MISO, kSD_MOSI, kSD_CS);
 
 
   //------------- nur bei Olimex - SBC ------------------------------------------
-#ifdef OLIMEX
+#ifdef BOARD_TYPE == OLIMEX
 if (Expander.begin()) {
 uint16_t ver = Expander.version();
 Serial.printf("CH32V003 firmware version: %d.%d" EOL, ver >> 8, ver & 0xFF);
